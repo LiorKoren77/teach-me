@@ -23,12 +23,14 @@ _HE_STOPWORDS = frozenset(
 _EN_STOPWORDS = frozenset(
     "a an the and or but if then of to in on at by for with from as is are was were be been being it its "
     "this that these those there here he she they them his her their we you i not no yes do does did have "
-    "has had will would can could should may might which who whom what when where why how than so such".split()
+    "has had will would can could should may might which who whom what when where why how than so "
+    "such".split()
 )
 _PT_STOPWORDS = frozenset(
     "a o as os um uma uns umas de do da dos das em no na nos nas por para com sem sob sobre e ou mas se "
     "que quem qual quais como quando onde porque não sim é são foi foram ser está estão ele ela eles elas "
-    "eu tu nós vós seu sua seus suas meu minha este esta isto esse essa isso aquele aquela aquilo há mais menos já".split()
+    "eu tu nós vós seu sua seus suas meu minha este esta isto esse essa isso aquele aquela aquilo há mais "
+    "menos já".split()
 )
 
 LANGUAGES: dict[str, Language] = {
