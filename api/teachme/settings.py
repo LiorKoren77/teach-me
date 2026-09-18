@@ -3,10 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import field_validator
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-SUPPORTED_LANGUAGES = ("he", "en", "pt")
+from teachme.domain.languages import LANGUAGES
 
 
 class Settings(BaseSettings):
@@ -14,7 +14,8 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=(".env", ".env.local"), extra="ignore")
 
-    database_url: str = "postgresql://teachme:teachme@localhost:5432/teachme"
+    # 5433: a native Postgres occupies 5432 on the dev machine; docker-compose maps to 5433
+    database_url: str = "postgresql://teachme:teachme@localhost:5433/teachme"
 
     llm_provider: Literal["anthropic", "fake"] = "anthropic"
     embeddings_provider: Literal["voyage", "fake"] = "voyage"
@@ -42,10 +43,15 @@ class Settings(BaseSettings):
     pages_per_read_batch: int = 6
     pages_per_chunk_batch: int = 6
 
+    # Credentials, passed explicitly to adapters instead of adapters reading os.environ themselves.
+    anthropic_api_key: SecretStr | None = None
+    voyage_api_key: SecretStr | None = None
+    blob_read_write_token: SecretStr | None = None
+
     @field_validator("enabled_languages")
     @classmethod
     def _known_languages(cls, value: list[str]) -> list[str]:
-        unknown = [code for code in value if code not in SUPPORTED_LANGUAGES]
+        unknown = [code for code in value if code not in LANGUAGES]
         if unknown:
-            raise ValueError(f"unsupported languages: {unknown}; supported: {list(SUPPORTED_LANGUAGES)}")
+            raise ValueError(f"unsupported languages: {unknown}; supported: {sorted(LANGUAGES)}")
         return value
