@@ -8,7 +8,12 @@ from uuid import UUID
 import psycopg
 
 from teachme.domain.assessment.sampling import sample_round
-from teachme.domain.assessment.scoring import round_score, section_weights, weak_sections
+from teachme.domain.assessment.scoring import (
+    UnmappedQuestion,
+    round_score,
+    section_weights,
+    weak_sections,
+)
 from teachme.domain.assessment.transitions import IllegalTransition, after_round, assert_transition
 from teachme.domain.glossary.render import GlossaryView, render_placeholders
 from teachme.domain.models import (
@@ -61,6 +66,16 @@ from teachme.telemetry.usage import usage_context
 RATE_WINDOW_SECONDS = 60
 
 
+def _from_bank(bank: dict[UUID, Question], aq: AttemptQuestion) -> Question:
+    """The question an answered row answers. `bank[aq.question_id]` raised a bare KeyError when
+    the bank was regenerated under an open round, which reached the client as a 500; the round
+    scoring already names the row it cannot map, and so does this."""
+    question = bank.get(aq.question_id)
+    if question is None:
+        raise UnmappedQuestion(aq)
+    return question
+
+
 class LearningError(Exception):
     pass
 
@@ -71,6 +86,17 @@ class NotAllowed(LearningError):
 
 class RateLimited(NotAllowed):
     """Too many submissions in the window. A refusal, but a temporary one: the API answers 429."""
+
+
+class QuestionClosed(LearningError):
+    """The question is not open for answering: it already carries a grade, or it belongs to another
+    attempt. A conflict with the state of the round, not an authorization failure - it used to be a
+    NotAllowed, and the student who answered twice was told 403 as if the attempt were not theirs.
+    """
+
+
+class InvalidChoice(LearningError):
+    """A multiple-choice submission that is not one of the question's options."""
 
 
 class BankExhausted(LearningError):
@@ -110,18 +136,25 @@ class LearningService:
 
     # views ----------------------------------------------------------------------------------
     def open_subject(self, user_id: str, subject: Subject) -> SubjectView:
+        """The subject's parts, and only the languages this deployment enables: the list view
+        already filtered them, and a subject view offering a language `start_part` refuses would
+        hand the student a language picker with a dead option in it."""
         self._require_published(subject)
         return SubjectView(
             subject_id=subject.id,
             name=subject.name,
-            languages=subject.languages,
+            languages=self._offered_languages(subject),
             parts=self._deps.progress_service.parts_with_progress(user_id, subject),
         )
+
+    def _offered_languages(self, subject: Subject) -> tuple[str, ...]:
+        enabled = self._deps.settings.enabled_languages
+        return tuple(code for code in subject.languages if code in enabled)
 
     def start_part(self, user_id: str, subject: Subject, position: int, language: str) -> PartSession:
         """Open a part for reading. Starts (or resumes) an attempt unless the part is already passed."""
         self._require_published(subject)
-        if language not in subject.languages:
+        if language not in self._offered_languages(subject):
             raise NotAllowed(f"language {language!r} is not enabled for {subject.name!r}")
         views = self._deps.progress_service.parts_with_progress(user_id, subject)
         view = next((v for v in views if v.position == position), None)
@@ -256,7 +289,7 @@ class LearningService:
         attempt, subject, progress = self._owned_attempt(user_id, attempt_id)
         aq = self._deps.attempts.get_question(attempt_question_id)
         if aq.attempt_id != attempt.id or aq.grade is not None:
-            raise NotAllowed("question is not open for answering")
+            raise QuestionClosed("question is not open for answering")
         if (
             self._deps.attempts.submissions_since_seconds(user_id, RATE_WINDOW_SECONDS)
             >= self._deps.settings.max_answers_per_minute
@@ -283,8 +316,12 @@ class LearningService:
         question: Question,
         answer_choice: int | None,
     ) -> AnswerResult:
-        if answer_choice is None:
-            raise NotAllowed("choose an option")
+        options = len(question.choices or ())
+        if answer_choice is None or not 0 <= answer_choice < options:
+            # The route already refuses a negative index and a body with no choice at all; this is
+            # the upper bound, which only the question knows: an index past the last option would
+            # otherwise be stored, and scored wrong, as if the student had chosen something.
+            raise InvalidChoice(f"choose one of that question's {options} options")
         grade = Grade.CORRECT if answer_choice == question.correct_choice else Grade.INCORRECT
         feedback = message(attempt.language, "mc_correct" if grade == Grade.CORRECT else "mc_incorrect")
         self._record_answer(
@@ -413,12 +450,12 @@ class LearningService:
         ]
         wrong = [
             WrongAnswer(
-                question=bank[aq.question_id].prompt,
+                question=_from_bank(bank, aq).prompt,
                 student_answer=aq.answer_text or "",
                 feedback=aq.feedback or "",
             )
             for aq in answered
-            if (aq.points or 0.0) < 1.0 and bank[aq.question_id].section_id in weak
+            if (aq.points or 0.0) < 1.0 and _from_bank(bank, aq).section_id in weak
         ]
         if not sections:
             return None  # nothing to reinforce: never ask the model to re-teach an empty list
@@ -491,7 +528,7 @@ class LearningService:
             check_verdict=check_verdict,
         )
         if count == 0:
-            raise NotAllowed("question is not open for answering")
+            raise QuestionClosed("question is not open for answering")
         if count < self._deps.settings.max_rejections_per_question:
             self._deps.conn.commit()
             current = self._question_view(attempt, self._deps.attempts.get_question(aq.id), subject)
@@ -527,7 +564,7 @@ class LearningService:
         """Answering is read, then model call, then write, and the write is what decides the race:
         a question another submission has graded in the meantime is refused, not overwritten."""
         if self._deps.attempts.record_answer(attempt_question_id, **fields) == 0:
-            raise NotAllowed("question is not open for answering")
+            raise QuestionClosed("question is not open for answering")
 
     def _after_answer(
         self,

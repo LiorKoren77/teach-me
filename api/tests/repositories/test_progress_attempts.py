@@ -137,6 +137,8 @@ def test_learning_schema_enforces_the_domain_enums_and_ranges(db):
         ("UPDATE attempt_questions SET relevance_band = 'medium' WHERE id = %s", (aq.id,)),
         ("UPDATE attempt_questions SET route = 'guess' WHERE id = %s", (aq.id,)),
         ("UPDATE attempt_questions SET relevance_score = 1.5 WHERE id = %s", (aq.id,)),
+        # a chosen option is an index into the question's choices, never negative
+        ("UPDATE attempt_questions SET answer_choice = -1 WHERE id = %s", (aq.id,)),
     ]
     for sql, params in rejected:
         with pytest.raises(psycopg.errors.CheckViolation):

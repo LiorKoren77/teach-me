@@ -44,7 +44,8 @@ CREATE TABLE attempt_questions (
   round_no         int  NOT NULL CHECK (round_no >= 0),
   position         int  NOT NULL CHECK (position >= 0),
   answer_text      text,
-  answer_choice    int,
+  -- an index into the question's choices; the service also checks it against their number
+  answer_choice    int CHECK (answer_choice >= 0),
   relevance_score  real CHECK (relevance_score BETWEEN 0 AND 1),
   relevance_band   text CHECK (relevance_band IN ('junk', 'low', 'uncertain', 'high')),
   route            text CHECK (

@@ -76,7 +76,7 @@ without it every token is treated as a student, since a missing `role` claim fal
 | --- | --- | --- | --- |
 | GET | `/api/health` | anyone | Liveness check; no auth required. |
 | GET | `/api/subjects` | student | List published subjects (in this deployment's enabled languages) with the caller's per-part progress. |
-| GET | `/api/subjects/{subject_id}` | student | Open a subject: its parts, each with the caller's progress and lock state. |
+| GET | `/api/subjects/{subject_id}` | student | Open a subject: its parts, each with the caller's progress and lock state, and the languages it can be taken in here (those it teaches, filtered by this deployment's enabled languages). |
 | POST | `/api/subjects/{subject_id}/parts/{position}/start` | student | Start or resume the caller's attempt at a part; returns the rendered part text and current session state. |
 | POST | `/api/attempts/{attempt_id}/round` | student | Sample and begin the attempt's next round of questions. |
 | POST | `/api/attempts/{attempt_id}/answer` | student | Submit an answer (free text or multiple-choice) for the current question; grades it and returns the next question or the round result. |
@@ -94,9 +94,12 @@ wins when one refusal subclasses another):
 | --- | --- | --- |
 | 401 | *(`current_user`, not a domain error)* | No `Authorization` header, a scheme other than `Bearer`, a token that cannot be verified against the configured JWKS, or a verified token with no `sub` claim. The Clerk guard is built with `auto_error=False` precisely so this status - and this body - comes from us rather than the SDK's `403 Forbidden`. |
 | 404 | `NotFound` | The subject, source, attempt, question or other resource does not exist. |
-| 403 | `NotAllowed` | The caller does not own the attempt, the part is locked, the language is not enabled for the subject, or (via `require_role`) the caller's role does not permit an admin route. |
+| 403 | `NotAllowed` | The caller does not own the attempt, the part is locked, the language is not one the subject teaches *and* this deployment enables (`ENABLED_LANGUAGES`), or (via `require_role`) the caller's role does not permit an admin route. |
 | 429 | `RateLimited` | A `NotAllowed` subclass: the caller submitted more answers/rejections than `MAX_ANSWERS_PER_MINUTE` allows in the last minute. |
-| 409 | `LearningError` (and `IllegalTransition`, `GenerationError`, `SubjectLocked`) | A state-machine refusal - e.g. answering a question that is not open, re-explaining outside `REINFORCING`, an illegal part-status transition, or a subject locked against generation/ingestion. |
+| 409 | `LearningError` (and `IllegalTransition`, `GenerationError`, `SubjectLocked`) | A state-machine refusal - e.g. re-explaining outside `REINFORCING`, an illegal part-status transition, or a subject locked against generation/ingestion. |
+| 409 | `QuestionClosed` | A `LearningError` subclass: the question is not open for answering - it already carries a grade, or it belongs to another attempt. A conflict with the state of the round, which is why it is not the `403` a foreign attempt gets. |
+| 409 | `InvalidChoice` | A `LearningError` subclass: a multiple-choice submission that is not one of the question's options - no choice at all, or an index past the last one (the route refuses a negative index as a `422`). |
+| 409 | `UnmappedQuestion` | An answered row referencing a question that is no longer in the part's bank. The foreign key cascades, so this is a guard rather than a path a request normally takes - but it names the row instead of surfacing as a `500`. |
 | 422 | *(FastAPI's built-in request validation, not in this table)* | A malformed request body - e.g. `AnswerRequest` requires exactly one of `answer_text`/`answer_choice`, and rejects neither or both. |
 
 Anything not listed here is a bug and stays a `500` with no detail, so internals never leak to

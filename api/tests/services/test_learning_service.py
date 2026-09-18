@@ -5,6 +5,7 @@ from uuid import uuid4
 import pytest
 
 from teachme.container import Container
+from teachme.domain.assessment.scoring import UnmappedQuestion
 from teachme.domain.assessment.transitions import IllegalTransition
 from teachme.domain.models import (
     AttemptStatus,
@@ -21,7 +22,14 @@ from teachme.grading.grader import GradeOut
 from teachme.grading.relevance_check import RelevanceVerdict
 from teachme.ports.llm import LLMError
 from teachme.repositories.attempts import AttemptNotFound, AttemptRepository
-from teachme.services.learning import BankExhausted, LearningError, NotAllowed
+from teachme.services.learning import (
+    BankExhausted,
+    InvalidChoice,
+    LearningError,
+    NotAllowed,
+    QuestionClosed,
+    _from_bank,
+)
 from teachme.settings import Settings
 from tests.helpers import make_pdf
 
@@ -98,6 +106,35 @@ def _answer_all(c, attempt_id, question, verdict="correct"):
             )
         question, result = res.next_question, res.round_result
     return result
+
+
+def _only_multiple_choice(c, attempt_id):
+    """Replace the part's bank with a single four-choice question, so the multiple-choice path is
+    reached every run instead of only when the sampler happens to draw one."""
+    part_id = c.attempts.get(attempt_id).part_id
+    section = c.outlines.sections(part_id)[0]
+    slug = c.glossary.terms(c.outlines.get(c.outlines.get_part(part_id).outline_id).id)[0].slug
+    c.questions.replace_for_part(
+        part_id,
+        "en",
+        [
+            Question(
+                id=uuid4(),
+                section_id=section.id,
+                language="en",
+                kind=QuestionKind.MULTIPLE_CHOICE,
+                prompt="Which layer absorbs it?",
+                expected_answer="B",
+                rubric=("names the layer",),
+                key_terms=(),
+                exact_values=(),
+                choices=("A", f"the {{{{term:{slug}|chosen layer}}}}", "C", "D"),
+                correct_choice=1,
+                position=0,
+            )
+        ],
+    )
+    c.conn.commit()
 
 
 def test_open_subject_creates_progress_and_locks_later_parts(env):
@@ -212,30 +249,7 @@ def test_multiple_choice_is_graded_in_code_without_a_model_call(env):
     run instead of only when the sampler happens to draw the bank's single choice question."""
     c, subject, fake = env
     session = c.learning_service.start_part(USER, subject, position=0, language="en")
-    part_id = c.attempts.get(session.attempt_id).part_id
-    section = c.outlines.sections(part_id)[0]
-    slug = c.glossary.terms(c.outlines.get(c.outlines.get_part(part_id).outline_id).id)[0].slug
-    c.questions.replace_for_part(
-        part_id,
-        "en",
-        [
-            Question(
-                id=uuid4(),
-                section_id=section.id,
-                language="en",
-                kind=QuestionKind.MULTIPLE_CHOICE,
-                prompt="Which layer absorbs it?",
-                expected_answer="B",
-                rubric=("names the layer",),
-                key_terms=(),
-                exact_values=(),
-                choices=("A", f"the {{{{term:{slug}|chosen layer}}}}", "C", "D"),
-                correct_choice=1,
-                position=0,
-            )
-        ],
-    )
-    c.conn.commit()
+    _only_multiple_choice(c, session.attempt_id)
 
     calls_before = len(fake.calls)
     question = c.learning_service.begin_round(USER, session.attempt_id)
@@ -333,7 +347,7 @@ def test_answers_are_recorded_once_even_under_concurrent_submission(env, db):
         return _grade("correct")(_req)
 
     fake.set_responder(GradeOut, grade_while_the_rival_commits)
-    with pytest.raises(NotAllowed, match="not open"):
+    with pytest.raises(QuestionClosed, match="not open"):
         c.learning_service.submit_answer(
             USER,
             session.attempt_id,
@@ -345,7 +359,7 @@ def test_answers_are_recorded_once_even_under_concurrent_submission(env, db):
 
     graded = _grader_calls(fake)
     fake.set_responder(GradeOut, _grade("correct"))
-    with pytest.raises(NotAllowed, match="not open"):
+    with pytest.raises(QuestionClosed, match="not open"):
         c.learning_service.submit_answer(
             USER, session.attempt_id, question.attempt_question_id, answer_text="another try"
         )
@@ -598,3 +612,71 @@ def test_render_text_resolves_glossary_placeholders(env):
     assert "{{term:" not in rendered and "ozone layer" in rendered
     unknown = c.learning_service.render_text(subject, "en", "A {{term:no-such-term|plain phrase}} here.")
     assert unknown == "A plain phrase here."
+
+
+def test_views_and_start_part_honour_the_deployment_s_enabled_languages(env):
+    """A language the subject teaches but this deployment does not enable is not offered by the
+    subject view and cannot be started - the same refusal as a language the subject never had."""
+    c, subject, _ = env
+    c.settings.enabled_languages = ["en"]
+    assert c.learning_service.open_subject(USER, subject).languages == ("en",)
+    with pytest.raises(NotAllowed, match="he"):
+        c.learning_service.start_part(USER, subject, position=0, language="he")
+    assert c.learning_service.start_part(USER, subject, position=0, language="en").attempt_id
+
+
+def test_a_choice_outside_the_question_s_options_is_refused(env):
+    c, subject, _ = env
+    session = c.learning_service.start_part(USER, subject, position=0, language="en")
+    _only_multiple_choice(c, session.attempt_id)
+    question = c.learning_service.begin_round(USER, session.attempt_id)
+    assert len(question.choices) == 4
+
+    with pytest.raises(InvalidChoice, match="4 options"):
+        c.learning_service.submit_answer(
+            USER, session.attempt_id, question.attempt_question_id, answer_choice=4
+        )
+    with pytest.raises(InvalidChoice):
+        c.learning_service.submit_answer(
+            USER, session.attempt_id, question.attempt_question_id, answer_text="text, not a choice"
+        )
+    # the question is untouched: an unanswerable submission is not a submission
+    assert c.attempts.get_question(question.attempt_question_id).grade is None
+    accepted = c.learning_service.submit_answer(
+        USER, session.attempt_id, question.attempt_question_id, answer_choice=3
+    )
+    assert accepted.accepted
+
+
+def test_a_question_closed_by_a_grade_is_a_conflict_not_an_authorization_failure(env):
+    """ "question is not open for answering" is about the state of the round, so it must not
+    answer 403 like a foreign attempt does."""
+    assert issubclass(QuestionClosed, LearningError) and not issubclass(QuestionClosed, NotAllowed)
+    c, subject, fake = env
+    fake.set_responder(GradeOut, _grade("correct"))
+    session = c.learning_service.start_part(USER, subject, position=0, language="en")
+    question = c.learning_service.begin_round(USER, session.attempt_id)
+    c.learning_service.submit_answer(
+        USER,
+        session.attempt_id,
+        question.attempt_question_id,
+        answer_text="The ozone layer of the atmosphere absorbs radiation.",
+    )
+    with pytest.raises(QuestionClosed, match="not open"):
+        c.learning_service.submit_answer(
+            USER, session.attempt_id, question.attempt_question_id, answer_text="a second answer"
+        )
+
+
+def test_a_question_missing_from_the_bank_names_the_row_instead_of_raising_a_keyerror(env):
+    """The FK from attempt_questions to questions cascades, so a regenerated bank takes the rows
+    that referenced it with it and the service cannot normally meet an unmapped row. The lookup
+    still refuses by name rather than with a bare KeyError, which reached the client as a 500,
+    and UnmappedQuestion is in the error table as a 409."""
+    c, subject, fake = env
+    session = c.learning_service.start_part(USER, subject, position=0, language="en")
+    question = c.learning_service.begin_round(USER, session.attempt_id)
+    aq = c.attempts.get_question(question.attempt_question_id)
+    with pytest.raises(UnmappedQuestion, match=str(aq.id)):
+        _from_bank({}, aq)
+    assert _from_bank({aq.question_id: c.questions.get(aq.question_id)}, aq).id == aq.question_id

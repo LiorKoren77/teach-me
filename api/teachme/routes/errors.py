@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from teachme.domain.assessment.scoring import UnmappedQuestion
 from teachme.domain.assessment.transitions import IllegalTransition
 from teachme.generation.errors import GenerationError
 from teachme.ingestion.errors import SubjectLocked
@@ -18,6 +19,7 @@ STATUS_BY_ERROR: tuple[tuple[int, type[Exception]], ...] = (
     (429, RateLimited),
     (409, LearningError),
     (409, IllegalTransition),
+    (409, UnmappedQuestion),
     (409, GenerationError),
     (409, SubjectLocked),
 )

@@ -91,6 +91,13 @@ def test_bad_requests_are_refused_without_reaching_the_service(api):
     assert (
         client.post(f"/api/subjects/{subject.id}/parts/9/start", json={"language": "he"}).status_code == 409
     )
+    # a question already graded is a state conflict, not an authorization failure
+    answer = {"attempt_question_id": aq}
+    answer |= {"answer_choice": 1} if question["kind"] == "multiple_choice" else {"answer_text": ANSWER}
+    answered = client.post(f"/api/attempts/{attempt_id}/answer", json=answer)
+    assert answered.status_code == 200, answered.text
+    again = client.post(f"/api/attempts/{attempt_id}/answer", json=answer)
+    assert again.status_code == 409 and "not open" in again.json()["detail"]
     missing = "00000000-0000-0000-0000-000000000000"
     assert client.get(f"/api/subjects/{missing}").status_code == 404
     assert client.post(f"/api/attempts/{missing}/round").status_code == 404
