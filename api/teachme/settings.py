@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     max_answers_per_minute: int = 20
     max_rejections_per_question: int = 2
     reinforce_sections_cap: int = 3
+    # Rendered subject corpora kept in the per-process cache; a corpus is a whole subject's
+    # text, so the cache is capped and evicts the least recently used entry.
+    corpus_cache_max_entries: int = 8
 
     # Relevance bands: at or above `high` an answer skips the relevance check, below `low` it is
     # LOW. Both go to the check, so these only move where the cheap model call is spent.

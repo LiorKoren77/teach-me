@@ -138,7 +138,7 @@ class Container:
 
     @cached_property
     def corpus_cache(self) -> CorpusCache:
-        return CorpusCache()
+        return CorpusCache(max_entries=self.settings.corpus_cache_max_entries)
 
     # scopes ---------------------------------------------------------------------------------
     @cached_property

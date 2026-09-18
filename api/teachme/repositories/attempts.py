@@ -110,6 +110,24 @@ class AttemptRepository:
             raise AttemptNotFound(attempt_id)
         return _attempt(row)
 
+    def lock_for_update(self, attempt_id: UUID) -> Attempt:
+        """The attempt row, locked until this transaction ends.
+
+        The lock is what serialises work that must happen once per attempt however many requests
+        ask for it - re-explanation, which is an Opus call - so the second caller waits and then
+        finds the row the first one committed instead of paying for the same text again.
+
+        FOR NO KEY UPDATE, not FOR UPDATE: two lockers still exclude each other, which is the
+        point, but a plain FOR UPDATE also conflicts with the FOR KEY SHARE that any other
+        transaction takes to check a foreign key against this attempt. That would have parked an
+        unrelated request inserting attempt_questions for the whole length of the model call."""
+        row = self._conn.execute(
+            f"SELECT {_ATTEMPT} FROM attempts WHERE id = %s FOR NO KEY UPDATE", (attempt_id,)
+        ).fetchone()
+        if row is None:
+            raise AttemptNotFound(attempt_id)
+        return _attempt(row)
+
     def active(self, user_id: str, part_id: UUID) -> Attempt | None:
         row = self._conn.execute(
             f"SELECT {_ATTEMPT} FROM attempts WHERE user_id = %s AND part_id = %s AND status = 'active'"

@@ -128,6 +128,7 @@ New settings from `api/teachme/settings.py` (env names as in `.env.example`):
 - `MAX_ANSWERS_PER_MINUTE` (`max_answers_per_minute`) - per-student rate limit on answers and rejections combined.
 - `MAX_REJECTIONS_PER_QUESTION` (`max_rejections_per_question`) - how many junk/off-topic rejections a question tolerates before it is auto-graded and closed.
 - `REINFORCE_SECTIONS_CAP` (`reinforce_sections_cap`) - maximum number of weak sections covered by one re-explanation.
+- `CORPUS_CACHE_MAX_ENTRIES` (`corpus_cache_max_entries`) - rendered subject corpora kept in the per-process cache before the least recently used one is evicted (section vocabularies get a multiple of this). Loading is locked per key, so rendering one subject's corpus never blocks a request for another.
 - `RELEVANCE_HIGH` / `RELEVANCE_LOW` (`relevance_high` / `relevance_low`) - lexical relevance-score thresholds: at or above `high` an answer skips the model check; below `low` it is `LOW`.
 - `RELEVANCE_THRESHOLDS` (`relevance_thresholds`) - per-language JSON overrides of the two thresholds above (the lexical score is not equally generous in every language).
 - `CLERK_JWKS_URL` (`clerk_jwks_url`) - Clerk's JWKS endpoint; unset means no auth guard is built and every authenticated route answers `503`.

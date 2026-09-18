@@ -433,8 +433,14 @@ class LearningService:
         attempt, subject, progress = self._owned_attempt(user_id, attempt_id)
         if progress.status != PartStatus.REINFORCING:
             raise NotAllowed("re-explanation is available only after a failed round")
+        # Two requests for the same round would both find no stored re-explanation and both pay
+        # for an Opus call. The attempt row is taken for update first, so the second one waits
+        # here and then finds the row the first committed. The lock is held until this
+        # transaction ends, which is why the cached path commits before returning.
+        self._deps.attempts.lock_for_update(attempt.id)
         existing = self._deps.attempts.latest_reexplanation(attempt.id)
         if existing and existing.round_no == attempt.round_no:
+            self._deps.conn.commit()
             on_delta(existing.body)
             return existing
         answered = self._deps.attempts.questions_for_round(attempt.id, attempt.round_no)
@@ -458,6 +464,7 @@ class LearningService:
             if (aq.points or 0.0) < 1.0 and _from_bank(bank, aq).section_id in weak
         ]
         if not sections:
+            self._deps.conn.commit()  # releases the attempt row
             return None  # nothing to reinforce: never ask the model to re-teach an empty list
         terms = self._deps.glossary.terms(outline.id)
         translations = {
@@ -480,19 +487,37 @@ class LearningService:
                     translations=by_slug,
                     on_delta=on_delta,
                 )
+            stored = self._store_reexplanation(attempt, weak_ids, result)
+        except Exception:
+            self._deps.conn.rollback()
+            raise
+        return stored
+
+    def _store_reexplanation(self, attempt: Attempt, section_ids: list[UUID], result) -> Reexplanation:
+        """The generated re-explanation, committed - or, if another caller got there first, the
+        one that caller committed.
+
+        reexplanations is unique on (attempt, round). The row lock in `reexplain` means a second
+        caller normally never reaches this insert; if one does, its own text is dropped rather
+        than the request failing, because the student is owed the round's re-explanation and not
+        a particular copy of it."""
+        try:
             stored = self._deps.attempts.add_reexplanation(
                 attempt.id,
                 round_no=attempt.round_no,
-                section_ids=weak_ids,
+                section_ids=section_ids,
                 language=attempt.language,
                 body=result.text,
                 model=result.model,
                 truncated=result.truncated,
             )
-            self._deps.conn.commit()
-        except Exception:
+        except psycopg.errors.UniqueViolation:
             self._deps.conn.rollback()
-            raise
+            existing = self._deps.attempts.latest_reexplanation(attempt.id)
+            if existing is None or existing.round_no != attempt.round_no:
+                raise
+            return existing
+        self._deps.conn.commit()
         return stored
 
     def render_text(self, subject: Subject, language: str, text: str) -> str:

@@ -680,3 +680,37 @@ def test_a_question_missing_from_the_bank_names_the_row_instead_of_raising_a_key
     with pytest.raises(UnmappedQuestion, match=str(aq.id)):
         _from_bank({}, aq)
     assert _from_bank({aq.question_id: c.questions.get(aq.question_id)}, aq).id == aq.question_id
+
+
+def test_a_re_explanation_that_lost_the_race_returns_the_stored_one(env, db):
+    """Two requests for the same round: the loser's insert violates the unique index, and rather
+    than failing the request it hands back the row the winner committed. The row lock means this
+    is the backstop, not the usual path."""
+    c, subject, fake = env
+    fake.set_responder(GradeOut, _grade("incorrect"))
+    session = c.learning_service.start_part(USER, subject, position=0, language="en")
+    first = c.learning_service.begin_round(USER, session.attempt_id)
+    _answer_all(c, session.attempt_id, first)
+    attempt = c.attempts.get(session.attempt_id)
+    rival = AttemptRepository(db)
+
+    def store_the_rivals_row_first(req):
+        rival.add_reexplanation(
+            attempt.id,
+            round_no=attempt.round_no,
+            section_ids=[],
+            language=attempt.language,
+            body="the rival re-explanation",
+            model="m",
+        )
+        db.commit()
+        return "## Again\n\nour own text"
+
+    fake.set_text_responder(store_the_rivals_row_first)
+    stored = c.learning_service.reexplain(USER, session.attempt_id, on_delta=lambda _delta: None)
+    assert stored is not None and stored.body == "the rival re-explanation"
+    rows = db.execute(
+        "SELECT count(*) AS n FROM reexplanations WHERE attempt_id = %s AND round_no = %s",
+        (attempt.id, attempt.round_no),
+    ).fetchone()
+    assert rows["n"] == 1

@@ -77,4 +77,7 @@ CREATE TABLE reexplanations (
   truncated   boolean NOT NULL DEFAULT false,
   created_at  timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX reexplanations_attempt_round_idx ON reexplanations(attempt_id, round_no);
+-- One re-explanation per round: the service locks the attempt row before generating one,
+-- and this is the backstop if two callers ever both reach the insert - a second Opus call
+-- for the same round is money spent twice on text the student already has.
+CREATE UNIQUE INDEX reexplanations_attempt_round_idx ON reexplanations(attempt_id, round_no);

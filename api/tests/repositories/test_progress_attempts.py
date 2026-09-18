@@ -5,6 +5,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 
+from teachme.adapters.db.engine import connect
 from teachme.domain.models import (
     AttemptStatus,
     Grade,
@@ -192,3 +193,55 @@ def test_missing_rows_are_reported_as_not_found(db):
     with pytest.raises(AttemptNotFound, match=str(missing)):
         repo.get_question(missing)
     assert repo.active("user_1", p1.id) is None  # no active attempt is an absence, not an error
+
+
+def test_locking_an_attempt_row_serialises_its_re_explanations(db, migrated_database):
+    """Re-explanation is an Opus call: two requests for the same round must not both make it.
+    The attempt row is the lock, so the second caller waits for the first to commit its row."""
+    _, _, (p1, _), q = _fixture(db)
+    repo = AttemptRepository(db)
+    attempt = repo.create("user_1", p1.id, "he")
+    db.commit()
+
+    assert repo.lock_for_update(attempt.id).id == attempt.id
+    with pytest.raises(AttemptNotFound):
+        repo.lock_for_update(uuid4())
+
+    rival = connect(migrated_database)
+    try:
+        rival.execute("SET lock_timeout = '500ms'")
+        with pytest.raises(psycopg.errors.LockNotAvailable):
+            AttemptRepository(rival).lock_for_update(attempt.id)  # held by db until it commits
+        rival.rollback()
+        # ... while a foreign key check against the same attempt is not blocked by that lock:
+        # FOR NO KEY UPDATE leaves an unrelated request free to insert against this attempt
+        rival.execute("SET lock_timeout = '500ms'")
+        AttemptRepository(rival).add_questions(attempt.id, round_no=9, question_ids=[q.id])
+        rival.commit()
+    finally:
+        rival.rollback()
+        rival.close()
+    db.commit()
+
+
+def test_one_re_explanation_per_attempt_and_round(db):
+    """The unique index is the backstop behind the row lock: even if two callers both reach the
+    insert, the round can only ever hold one re-explanation."""
+    _, _, (p1, _), q = _fixture(db)
+    repo = AttemptRepository(db)
+    attempt = repo.create("user_1", p1.id, "he")
+    repo.add_reexplanation(
+        attempt.id, round_no=1, section_ids=[q.section_id], language="he", body="again", model="m"
+    )
+    db.commit()
+
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        repo.add_reexplanation(
+            attempt.id, round_no=1, section_ids=[q.section_id], language="he", body="twice", model="m"
+        )
+    db.rollback()
+    # the next round of the same attempt is a different re-explanation, not a duplicate
+    repo.add_reexplanation(
+        attempt.id, round_no=2, section_ids=[q.section_id], language="he", body="round two", model="m"
+    )
+    assert repo.latest_reexplanation(attempt.id).round_no == 2
