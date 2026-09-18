@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from typer.testing import CliRunner
 
+from teachme.adapters.db.migrate import SchemaOutOfDate
 from teachme.container import Container
 from teachme.settings import Settings
 from tests.helpers import make_pdf
@@ -27,7 +28,7 @@ def cli(db, migrated_database, tmp_path, monkeypatch):
         pages_per_chunk_batch=2,
     )
     container = Container(settings)
-    monkeypatch.setattr(main, "build_container", lambda: container)
+    monkeypatch.setattr(main, "build_container", lambda *a, **kw: container)
     monkeypatch.setattr(container, "close", lambda: None)  # commands call close(); keep it open for the test
     pdf = tmp_path / "ch1.pdf"
     pdf.write_bytes(make_pdf(3))
@@ -86,6 +87,41 @@ def test_ingest_rejects_unknown_type(cli):
     bad.write_bytes(b"PK")
     result = runner.invoke(app, ["ingest", "--subject", "Geo", "--yes", str(bad)])
     assert result.exit_code == 1 and "not accepted" in result.output
+
+
+def test_source_list_reports_a_missing_subject_plainly(cli):
+    app, *_ = cli
+    result = runner.invoke(app, ["source", "list", "--subject", "Nope"])
+    assert result.exit_code == 1
+    assert "error: subject Nope not found" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_commands_refuse_to_run_against_an_out_of_date_schema(migrated_database, tmp_path, monkeypatch):
+    import teachme.cli.main as main
+
+    settings = Settings(
+        _env_file=None,
+        database_url=migrated_database,
+        llm_provider="fake",
+        embeddings_provider="fake",
+        reranker_provider="noop",
+        file_store="local",
+        local_files_dir=tmp_path / "files",
+        digest_dir=tmp_path / "digest",
+    )
+    monkeypatch.setattr(main, "Container", lambda *a, **kw: Container(settings))
+
+    def out_of_date(conn):
+        raise SchemaOutOfDate(["0001_initial"])
+
+    monkeypatch.setattr(main, "ensure_schema_current", out_of_date)
+
+    result = runner.invoke(main.app, ["subject", "list"])
+
+    assert result.exit_code == 1
+    assert "teachme migrate" in result.output
+    assert "Traceback" not in result.output
 
 
 def test_ingest_survives_a_corrupt_pdf(cli):
