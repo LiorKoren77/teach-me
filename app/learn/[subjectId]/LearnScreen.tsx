@@ -1,6 +1,6 @@
 "use client";
 
-import { UserButton } from "@clerk/nextjs";
+import { UserButton, useAuth } from "@clerk/nextjs";
 import Link from "next/link";
 import { useMemo } from "react";
 import { DialogPane } from "@/components/DialogPane";
@@ -9,20 +9,30 @@ import { PartProgress } from "@/components/PartProgress";
 import { SourceList } from "@/components/SourceList";
 import { SubjectTabs } from "@/components/SubjectTabs";
 import { TeachingPane } from "@/components/TeachingPane";
+import { UploadPane } from "@/components/UploadPane";
+import { useAdminActions } from "@/hooks/useAdminActions";
 import { useLanguage } from "@/hooks/useLanguage";
 import { useLearningSession } from "@/hooks/useLearningSession";
 import { usePageImages } from "@/hooks/usePageImage";
 import { useReexplainStream } from "@/hooks/useReexplainStream";
 import { useSources, useSubjects } from "@/hooks/useSubjects";
 import { directionOf, t } from "@/lib/i18n";
+import { isAdmin } from "@/lib/role";
 
 // The screen from the spec: subject tabs and the part strip on top, the teaching text above the
 // tutor dialog in the main column, the sources on the right, stacked on narrow screens. It holds
 // no state of its own - the hooks own the flow and the components take plain props.
 export function LearnScreen({ subjectId }: { subjectId: string }) {
   const { language: preferred, chooseLanguage } = useLanguage();
+  const { sessionClaims } = useAuth();
   const { subjects } = useSubjects();
   const { sources } = useSources(subjectId);
+  // Only an admin's session asks for any of this: with a null id the hook requests nothing at
+  // all, so a student never touches an admin route. The pane is offered while the subject is
+  // still a draft - once it is published its sources are locked anyway.
+  const admin = isAdmin(sessionClaims);
+  const authoring = useAdminActions(admin ? subjectId : null);
+  const draft = authoring.status !== null && authoring.status.state !== "published";
   const { subject, session, question, lastAnswer, roundResult, busy, error, language, open, startRound, submit, continueAfterRound } =
     useLearningSession(subjectId, preferred);
 
@@ -97,8 +107,20 @@ export function LearnScreen({ subjectId }: { subjectId: string }) {
               onContinue={continueAfterRound}
             />
           </main>
-          <aside>
+          <aside className="flex flex-col gap-6">
             <SourceList sources={sources ?? []} strings={strings} />
+            {admin && draft ? (
+              <UploadPane
+                sources={authoring.sources ?? []}
+                acceptedMediaTypes={authoring.acceptedMediaTypes}
+                published={authoring.published}
+                busy={authoring.busy}
+                strings={strings}
+                onUpload={authoring.upload}
+                onDelete={authoring.remove}
+                onReingest={authoring.reingest}
+              />
+            ) : null}
           </aside>
         </div>
       ) : null}

@@ -125,6 +125,22 @@ The Admin link is offered only to a reader whose session token carries the admin
 (`lib/role.ts` reads the same `role` claim the API verifies); the page and every route behind it
 check for themselves regardless.
 
+`/admin` is the CLI's ingest/generate/publish loop in a page. `hooks/useAdminActions.ts` owns all
+of it - uploading, deleting and re-ingesting sources, generating, publishing and unpublishing -
+and both its polls, so `components/UploadPane.tsx`, `SourceRow.tsx` and `SubjectActions.tsx` stay
+plain: while any source is not yet `ready` or `failed` the source list is re-read every 3 s, and a
+job started by generate or re-ingest is followed through `GET /api/admin/jobs/{id}` until it is
+done or failed. The file picker's `accept` comes from `GET /api/admin/capabilities`, never from a
+list written here, so it offers exactly what the backend will take - and the backend still refuses
+an unaccepted type with 415, which `lib/api/errors.ts` maps like any other failure (413 and 415
+have their own messages). Uploads go through `apiUpload` in `lib/api/client.ts`: one `FormData`
+with the session bearer and no explicit Content-Type, since only the browser knows the multipart
+boundary. Publish is disabled unless the status endpoint says `publishable`; a published subject
+locks its own sources, so the upload control and the per-source buttons disappear rather than fail.
+The same pane appears in the right column of `/learn/[subjectId]` for an admin reading a draft
+subject, and for nobody else - with no subject id the hook makes no request at all, so a student's
+session never touches an admin route.
+
 Failed requests are shown, not printed: `lib/api/errors.ts` maps an `ApiError` status (401, 403,
 409, 429, anything else) to a key in the `errors` block of `lib/i18n.ts`, `hooks/useApiError.ts`
 sends the backend's `detail` to `console.debug`, and a 401 goes to Clerk's `redirectToSignIn()`
