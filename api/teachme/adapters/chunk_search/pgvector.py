@@ -68,7 +68,7 @@ class PgVectorChunkSearch:
         rows = self._conn.execute(
             f"SELECT {_HIT_COLUMNS}, subject_id, embedding::text AS embedding, embedding_model,"
             " array_to_string(tsvector_to_array(tokens), ' ') AS tokens"
-            " FROM chunks WHERE source_id = %s ORDER BY page_start, page_end",
+            " FROM chunks WHERE source_id = %s ORDER BY page_start, page_end, id",
             (source_id,),
         ).fetchall()
         return [

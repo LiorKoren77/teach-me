@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
+from uuid import UUID
+
 import pytest
 
 from teachme.adapters.embeddings.fake import FakeEmbedder
 from teachme.adapters.file_store.local import LocalFileStore
-from teachme.domain.models import SubjectState
+from teachme.domain.models import Chunk, ChunkRecord, SubjectState
 from teachme.ingestion.bundle import BundleReader, bundle_slug
 from teachme.ingestion.errors import SubjectLocked
 from teachme.repositories.usage import UsageRepository
@@ -51,6 +54,48 @@ def test_import_reuses_vectors_when_model_matches(db, make_container, tmp_path):
     assert container.search.count(target.id) == 3
     assert _embed_calls(container) == before  # no re-embedding
     assert len(container.pages.list(imported.id)) == 3
+
+
+def test_export_chunk_order_is_stable_across_runs(db, make_container, tmp_path):
+    container = _container(make_container)
+    subject, source = _ingested(container)
+
+    # Two extra chunks tied on the same page range as the existing page-0 chunk, inserted with
+    # ids on opposite ends of the id space and in an order that contradicts id order - this pins
+    # down the tie-break that ORDER BY page_start, page_end alone leaves unspecified.
+    vector = container.embedder.embed_documents(["tie"]).vectors[0]
+    tied = [
+        ChunkRecord(
+            id=UUID("ffffffff-ffff-ffff-ffff-ffffffffffff"),
+            source_id=source.id,
+            subject_id=subject.id,
+            chunk=Chunk(context="ctx", text="tied-high", page_start=0, page_end=0),
+            embedding=vector,
+            embedding_model=container.embedder.model,
+            tokens=("tied-high",),
+        ),
+        ChunkRecord(
+            id=UUID("00000000-0000-0000-0000-000000000000"),
+            source_id=source.id,
+            subject_id=subject.id,
+            chunk=Chunk(context="ctx", text="tied-low", page_start=0, page_end=0),
+            embedding=vector,
+            embedding_model=container.embedder.model,
+            tokens=("tied-low",),
+        ),
+    ]
+    container.search.upsert(tied)
+
+    out1 = container.export_import.export_source(source.id, tmp_path / "export1")
+    out2 = container.export_import.export_source(source.id, tmp_path / "export2")
+    bytes1 = (out1 / "chunks.jsonl").read_bytes()
+    bytes2 = (out2 / "chunks.jsonl").read_bytes()
+    assert bytes1 == bytes2
+
+    rows = [json.loads(line) for line in bytes1.decode().splitlines()]
+    page_zero_texts = [row["text"] for row in rows if row["page_start"] == 0]
+    assert page_zero_texts[0] == "tied-low"
+    assert page_zero_texts[-1] == "tied-high"
 
 
 def test_import_replaces_existing_import_of_same_bundle(db, make_container, tmp_path):
