@@ -11,10 +11,14 @@ def test_the_shipped_fixtures_load_and_cover_the_three_languages():
     cases = load_cases()
     assert [case.spec.language for case in cases] == ["en", "he", "pt"]
     for case in cases:
-        text = case.source.decode("utf-8")
+        # Several one-page sources, not one: a single-page text source is always one outline
+        # section, which could never fail the min_sections bound the harness checks it against.
+        assert len(case.sources) >= 2
+        text = "".join(data.decode("utf-8") for _, data in case.sources)
         assert 300 < len(text.split()) < 1200
         assert text.count("> **[Figure:") == 2
         assert case.spec.teach_in[0] == case.spec.language
+        assert case.spec.outline.min_sections >= 2
         assert {a.expected_grade for a in case.spec.answers} >= {"correct", "incorrect", "junk"}
 
 

@@ -1,16 +1,16 @@
 {
   "language": "en",
   "teach_in": ["en", "he"],
-  "outline": {"min_parts": 1, "max_parts": 3, "min_sections": 1},
+  "outline": {"min_parts": 1, "max_parts": 3, "min_sections": 2},
   "answers": [
     {
       "question_contains": "evaporat",
-      "answer": "Heat from the sun gives water molecules at the surface enough energy to leave the liquid and rise into the air as invisible water vapour, and most of that vapour comes from the oceans.",
+      "answer": "As expected, the short answer is that heat from the sun gives water molecules at the surface enough energy to leave the liquid and rise into the air as invisible water vapour, and most of that vapour comes from the oceans.",
       "expected_grade": "correct"
     },
     {
       "question_contains": "condens",
-      "answer": "Rain falls out of clouds straight into the sea, which is what condensation means.",
+      "answer": "Condensation is simply rain falling out of clouds straight into the sea, part of how water moves between the ocean, the atmosphere and the wider biosphere.",
       "expected_grade": "incorrect"
     },
     {

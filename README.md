@@ -152,30 +152,38 @@ so two model or prompt choices can be compared on identical inputs:
 teachme eval                       # every shipped fixture: en, he, pt
 teachme eval --language en -l he   # repeatable
 teachme eval --fixtures my-cases   # a folder of fixture folders of your own
+teachme eval --keep                # skip teardown; leave the fixture subjects published
 ```
 
 Each fixture is a folder under `api/teachme/eval/fixtures/<language>/`:
 
-- `source.md` - a few hundred words on one topic in that language, with two
-  `> **[Figure: ...]**` blocks so figure handling is exercised;
+- `source-1.md`, `source-2.md`, ... - one or more one-page markdown sources on one topic in that
+  language (a text source is always ingested as a single page), two `> **[Figure: ...]**` blocks
+  between them so figure handling is exercised, and at least two files so the outline has more
+  than one section to check;
 - `expected.json` (or `expected.yaml`) - the languages to generate, the bounds a sane outline
   falls within, and a list of answers a synthetic student gives with the grade each deserves.
-  Validated by the pydantic models in `api/teachme/eval/fixtures.py`, so a malformed fixture is
-  named rather than half-run.
+  Validated by the pydantic models in `api/teachme/eval/fixtures.py`, which also checks that the
+  spec's `language` matches the folder name, so a malformed or misplaced fixture is named rather
+  than half-run.
 
-A run ingests each source into a freshly named subject of its own, generates and publishes it,
-then answers its generated questions - each expected answer as a separate synthetic student, so
-one answer's grade never changes which questions the next is asked. The report names, per
-fixture, whether the outline fell within bounds, how often the recorded grade matched the
+A run ingests each fixture's sources into a freshly named subject of its own, generates and
+publishes it, then answers its generated questions - each expected answer as a separate synthetic
+student, so one answer's grade never changes which questions the next is asked. The report names,
+per fixture, whether the outline fell within bounds, how often the recorded grade matched the
 expected one, how often the route matched (an answer the model check rejected counts as having
 reached the check), how many genuine attempts the relevance gate refused anyway, and what the
 whole fixture cost. Every call goes through the configured providers under the usual usage
-context, so `teachme usage` accounts for an eval run like any other work.
+context, so `teachme usage` accounts for an eval run like any other work. Once a fixture is
+scored, its subject is unpublished, its sources deleted and its row dropped, so an eval subject
+never lingers in a student's `GET /api/subjects` - `--keep` skips that teardown and prints the
+kept subject names, for inspecting a run's output by hand.
 
-On the fake stack (`LLM_PROVIDER=fake`) the run exercises the plumbing rather than any model's
-judgement: the fake grader credits word overlap with the expected answer, so agreement numbers
-mean nothing until the harness runs against `LLM_PROVIDER=anthropic`. The fixtures' outline
-bounds allow a single part with a single section because a text source is ingested as one page.
+On the fake stack (`LLM_PROVIDER=fake`) the run mostly exercises the plumbing rather than any
+model's judgement - the fake grader credits word overlap with the expected answer, so an
+agreement number here is not a measure of grading quality until the harness runs against
+`LLM_PROVIDER=anthropic` - but the shipped fixtures are still calibrated to reach 100% grading
+agreement even on the fake stack, so a regression in the plumbing itself still shows up.
 
 ### Stage 3 settings
 

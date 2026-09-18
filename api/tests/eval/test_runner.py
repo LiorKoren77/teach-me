@@ -13,9 +13,10 @@ def test_eval_runner_reports_metrics_with_fake_stack(db, make_container):
 
     (fixture,) = report.fixtures
     assert fixture.language == "en"
-    assert fixture.outline_ok is True and fixture.parts >= 1 and fixture.sections >= 1
+    # min_sections: 2 in the fixture's outline bounds; a single-page source could never fail it.
+    assert fixture.outline_ok is True and fixture.parts >= 1 and fixture.sections >= 2
     assert len(fixture.answers) == 4
-    assert 0.0 <= fixture.grading_agreement <= 1.0
+    assert fixture.grading_agreement == 1.0
     assert 0.0 <= fixture.route_agreement <= 1.0
     assert fixture.relevance_false_rejects == 0
     assert fixture.cost_usd >= 0.0
@@ -35,7 +36,13 @@ def test_every_answer_reaches_the_loop_and_is_scored_against_its_expectation(db,
     (junk,) = [a for a in fixture.answers if a.expected_grade == "junk"]
     assert junk.accepted is False and junk.agrees is True
     (off_topic,) = [a for a in fixture.answers if a.expected_grade == "off_topic"]
-    assert off_topic.route == "check" and off_topic.route_agrees is True
+    # The fake relevance gate now actually rejects it, so the recorded route is the rejection
+    # itself - which still counts as "reached the check" for a fixture that only asked for that.
+    assert off_topic.route == "reject_off_topic" and off_topic.route_agrees is True
+    (correct,) = [a for a in fixture.answers if a.expected_grade == "correct"]
+    assert correct.grade == "correct" and correct.accepted is True
+    (incorrect,) = [a for a in fixture.answers if a.expected_grade == "incorrect"]
+    assert incorrect.grade == "incorrect" and incorrect.accepted is True
     for answer in fixture.answers:
         assert answer.grade in ("correct", "partial", "incorrect", "off_topic", "junk", "rejected")
         assert answer.question  # the question it was actually asked

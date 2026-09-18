@@ -5,7 +5,7 @@ import re
 from pydantic import BaseModel
 
 from teachme.adapters.llm.fake import Responder
-from teachme.domain.text.normalize import normalize
+from teachme.domain.text.normalize import normalize, tokenize
 from teachme.grading.grader import GradeOut
 from teachme.grading.relevance_check import RelevanceVerdict
 from teachme.grading.sanitize import TAG
@@ -54,9 +54,19 @@ def _grade(request: StructuredRequest) -> BaseModel:
 
 
 def _relevance(request: StructuredRequest) -> BaseModel:
-    """The fake gate never rejects: the model check exists to save a grading call, never to cost
-    a student their answer, and a test that wants a rejection installs its own responder."""
-    return RelevanceVerdict(verdict="on_topic")
+    """Deterministic but meaningful, unlike a gate that always waves an answer through: off_topic
+    when the answer shares no content word - by the same tokenizer and stopword lists the real
+    lexical scorer uses - with the question or the expected answer in the brief, on_topic
+    otherwise. This is not a judgement of correctness - that is the grader's job - only of
+    whether the answer is an attempt at this question at all, which is exactly what the real
+    check is asked to gate. A test that wants a specific verdict installs its own responder."""
+    text = _user_text(request)
+    language = _line(text, "LANGUAGE") or "en"
+    question_words = tokenize(_line(text, "QUESTION"), language)
+    expected_words = tokenize(_line(text, "EXPECTED"), language)
+    reference = set(question_words) | set(expected_words)
+    overlap = reference & set(tokenize(_answer(text), language))
+    return RelevanceVerdict(verdict="on_topic" if overlap else "off_topic")
 
 
 def default_responders() -> dict[type[BaseModel], Responder]:

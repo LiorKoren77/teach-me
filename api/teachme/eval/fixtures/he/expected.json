@@ -1,16 +1,16 @@
 {
   "language": "he",
   "teach_in": ["he", "en"],
-  "outline": {"min_parts": 1, "max_parts": 3, "min_sections": 1},
+  "outline": {"min_parts": 1, "max_parts": 3, "min_sections": 2},
   "answers": [
     {
       "question_contains": "אידוי",
-      "answer": "החום מן השמש מעניק למולקולות שעל פני המים מספיק אנרגיה כדי להשתחרר מן הנוזל ולעלות אל האוויר כאדי מים, ורוב האדים שבאטמוספרה מתאדים מן האוקיינוסים.",
+      "answer": "כפי שהיה expected, זו התשובה answer: החום מן השמש מעניק למולקולות שעל פני המים מספיק אנרגיה כדי להשתחרר מן הנוזל ולעלות אל האוויר כאדי מים, ורוב האדים שבאטמוספרה מתאדים מן האוקיינוסים.",
       "expected_grade": "correct"
     },
     {
       "question_contains": "עיבוי",
-      "answer": "עיבוי הוא כשהגשם נופל מן הענן ישר אל הים.",
+      "answer": "עיבוי הוא כשהגשם נופל מן הענן ישר אל הים, כחלק ממחזור שכולל את ה-atmosphere וה-biosphere.",
       "expected_grade": "incorrect"
     },
     {

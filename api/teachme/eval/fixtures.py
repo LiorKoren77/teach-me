@@ -8,7 +8,9 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
-SOURCE_NAME = "source.md"
+SOURCE_GLOB = "source*.md"
+"""A fixture's material, one or more markdown files, sorted by filename: several files ingest as
+several one-page sources, which is what gives a text fixture more than one page to outline."""
 SPEC_NAMES = ("expected.json", "expected.yaml", "expected.yml")
 
 ExpectedGrade = Literal["correct", "partial", "incorrect", "off_topic", "junk"]
@@ -64,8 +66,9 @@ class FixtureCase(BaseModel):
     spec: Fixture
 
     @property
-    def source(self) -> bytes:
-        return (self.folder / SOURCE_NAME).read_bytes()
+    def sources(self) -> list[tuple[str, bytes]]:
+        """Every source file for this fixture, by filename, in sorted (reading) order."""
+        return [(path.name, path.read_bytes()) for path in sorted(self.folder.glob(SOURCE_GLOB))]
 
 
 def load_cases(directory: Path | None = None, *, languages: Sequence[str] | None = None) -> list[FixtureCase]:
@@ -89,8 +92,8 @@ def _load(folder: Path) -> FixtureCase:
     spec_path = next((folder / name for name in SPEC_NAMES if (folder / name).is_file()), None)
     if spec_path is None:
         raise FixtureError(f"{folder} has none of {', '.join(SPEC_NAMES)}")
-    if not (folder / SOURCE_NAME).is_file():
-        raise FixtureError(f"{folder} has no {SOURCE_NAME}")
+    if not any(folder.glob(SOURCE_GLOB)):
+        raise FixtureError(f"{folder} has no files matching {SOURCE_GLOB}")
     try:
         spec = Fixture.model_validate(_parse(spec_path))
     except ValueError as exc:

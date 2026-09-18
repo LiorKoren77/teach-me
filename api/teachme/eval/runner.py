@@ -6,7 +6,7 @@ from uuid import UUID, uuid4
 
 from teachme.container import Container
 from teachme.domain.models import AttemptQuestion, Question, QuestionKind, Subject, SubjectState
-from teachme.eval.fixtures import SOURCE_NAME, ExpectedAnswer, Fixture, FixtureCase, load_cases
+from teachme.eval.fixtures import ExpectedAnswer, Fixture, FixtureCase, load_cases
 from teachme.eval.report import AnswerOutcome, EvalReport, FixtureReport
 
 REAL_ATTEMPT_GRADES = frozenset({"correct", "partial", "incorrect"})
@@ -90,8 +90,9 @@ class EvalRunner:
         compares against the first instead of colliding with it."""
         scope = self._c.scope
         subject = scope.subject_service.get_or_create(name, case.spec.teach_in)
-        source = scope.source_service.register(subject, SOURCE_NAME, case.source)
-        scope.pipeline.ingest_source(source.id)
+        for filename, data in case.sources:
+            source = scope.source_service.register(subject, filename, data)
+            scope.pipeline.ingest_source(source.id)
         scope.tutorial_service.generate(subject)
         return scope.tutorial_service.publish(subject)
 
