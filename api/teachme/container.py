@@ -4,7 +4,6 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from functools import cached_property
 
-import httpx
 import psycopg
 from psycopg_pool import ConnectionPool
 
@@ -108,10 +107,13 @@ class Container:
         return connect(self.settings.database_url, autocommit=True)
 
     @cached_property
-    def http_client(self) -> httpx.Client:
+    def http_client(self):
         """Outgoing HTTP this process makes on its own behalf - today only the vercel_function
-        job runner calling this deployment back. One client, so connections are reused."""
-        return httpx.Client()
+        job runner calling this deployment back. One client, so connections are reused; built by
+        that adapter, so httpx is imported only by a deployment that has selected it."""
+        from teachme.adapters.job_runner.vercel_function import make_http_client
+
+        return make_http_client()
 
     @property
     def has_pool(self) -> bool:

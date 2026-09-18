@@ -24,6 +24,13 @@ def daemon_thread(work: Callable[[], None]) -> None:
     threading.Thread(target=work, daemon=True).start()
 
 
+def make_http_client() -> httpx.Client:
+    """The process-wide client this runner posts with. Built here rather than in the container,
+    because this is the only outgoing HTTP the app makes on its own behalf - so httpx is imported
+    with the adapter that needs it and not by every `teachme --help`."""
+    return httpx.Client()
+
+
 class VercelFunctionJobRunner:
     """Hands a job to another invocation of this same deployment.
 

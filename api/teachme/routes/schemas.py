@@ -130,7 +130,7 @@ class AdminJob(BaseModel):
     error: str | None
 
 
-class Capabilities(BaseModel):
+class AdminCapabilities(BaseModel):
     """What this deployment's file picker may offer: a property of the configured LLM adapter and
     of ALLOWED_UPLOAD_TYPES, so it is asked for rather than hard-coded in the client."""
 

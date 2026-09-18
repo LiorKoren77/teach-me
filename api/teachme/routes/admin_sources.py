@@ -11,12 +11,12 @@ from teachme.ingestion.errors import SubjectLocked, UploadTooLarge
 from teachme.ingestion.pipeline import INGEST_SOURCE
 from teachme.routes.deps import ScopeDep
 from teachme.routes.schemas import (
+    AdminCapabilities,
     AdminJob,
     AdminJobRef,
     AdminSubject,
     AdminSubjectStatus,
     AdminUpload,
-    Capabilities,
 )
 from teachme.services.generation_jobs import GENERATE_SUBJECT, GenerateSubjectJob
 
@@ -40,9 +40,9 @@ def _refuse_oversized(request: Request, limit: int) -> None:
         raise UploadTooLarge(f"upload is larger than the {limit} byte limit")
 
 
-@router.get("/capabilities", response_model=Capabilities)
-def capabilities(user: AdminUser, scope: ScopeDep) -> Capabilities:
-    return Capabilities(
+@router.get("/capabilities", response_model=AdminCapabilities)
+def capabilities(user: AdminUser, scope: ScopeDep) -> AdminCapabilities:
+    return AdminCapabilities(
         accepted_media_types=sorted(scope.source_service.accepted_media_types()),
         max_upload_bytes=scope.shared.settings.max_upload_bytes,
     )
@@ -103,6 +103,8 @@ def publish(subject_id: UUID, user: AdminUser, scope: ScopeDep) -> AdminSubject:
 
 @router.post("/subjects/{subject_id}/unpublish", response_model=AdminSubject)
 def unpublish(subject_id: UUID, user: AdminUser, scope: ScopeDep) -> AdminSubject:
+    """Idempotent: a subject that is already a draft is answered 200 with itself, because the
+    caller asked for a state, not for a transition."""
     return AdminSubject.of(scope.tutorial_service.unpublish(scope.subjects.get(subject_id)))
 
 

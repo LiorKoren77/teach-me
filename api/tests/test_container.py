@@ -15,12 +15,13 @@ from tests.helpers import make_pdf
 
 
 def test_importing_container_does_not_import_vendor_sdks():
-    """anthropic, voyageai, boto3 and vercel are only needed by the adapter a deployment actually
-    selects; importing them eagerly slows down `teachme --help` and the fake stack, and requires
-    them to be installed even when unused."""
+    """anthropic, voyageai, boto3, vercel and httpx are only needed by the adapter a deployment
+    actually selects; importing them eagerly slows down `teachme --help` and the fake stack, and
+    requires them to be installed even when unused. httpx belongs to the one runner that makes
+    outgoing HTTP, which is where its client is built."""
     code = (
         "import sys, teachme.container\n"
-        "print([m for m in ('anthropic', 'voyageai', 'boto3', 'vercel') if m in sys.modules])"
+        "print([m for m in ('anthropic', 'voyageai', 'boto3', 'vercel', 'httpx') if m in sys.modules])"
     )
     result = subprocess.run(
         [sys.executable, "-c", code], capture_output=True, text=True, check=True, timeout=30

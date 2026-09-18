@@ -187,7 +187,7 @@ without it every token is treated as a student, since a missing `role` claim fal
 | POST | `/api/admin/subjects/{subject_id}/generate` | admin | Queue a `generate_subject` job for a draft subject; answers with the `job_id`. |
 | GET | `/api/admin/subjects/{subject_id}/status` | admin | `TutorialService.status` for the pane: per-language parts ready, questions, failed parts, and whether (and which version) it can publish. |
 | POST | `/api/admin/subjects/{subject_id}/publish` | admin | Publish the newest complete outline version; answers with the updated subject. |
-| POST | `/api/admin/subjects/{subject_id}/unpublish` | admin | Return the subject to draft; answers with the updated subject. |
+| POST | `/api/admin/subjects/{subject_id}/unpublish` | admin | Return the subject to draft; answers with the updated subject. Idempotent: a subject that is already a draft is a `200` with itself, not a refusal. |
 | POST | `/api/jobs/run` | the deployment itself | Runs one unit of a queued job. No Clerk session: the only credential is the `x-job-secret` header, compared against `JOB_RUNNER_SECRET` in constant time. See "Background jobs". |
 
 The `RenderedPart` a `/start` (or a learn route) returns carries `page_refs`: the global page

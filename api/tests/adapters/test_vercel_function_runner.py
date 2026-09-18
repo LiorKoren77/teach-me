@@ -5,7 +5,7 @@ import threading
 import httpx
 import pytest
 
-from teachme.adapters.job_runner.vercel_function import VercelFunctionJobRunner
+from teachme.adapters.job_runner.vercel_function import VercelFunctionJobRunner, make_http_client
 from teachme.repositories.jobs import JobRepository
 
 
@@ -143,3 +143,13 @@ def test_a_broken_failure_recording_is_logged_not_raised(db, caplog):
 def test_refuses_to_be_built_without_a_target_or_a_secret(missing):
     with pytest.raises(ValueError):
         make_runner(**{missing: ""})
+
+
+def test_the_http_client_is_built_where_it_is_used():
+    """The only outgoing HTTP this process makes on its own behalf is this runner's, so the
+    client is this module's to build - the container asks for one rather than knowing httpx."""
+    client = make_http_client()
+    try:
+        assert isinstance(client, httpx.Client)
+    finally:
+        client.close()
