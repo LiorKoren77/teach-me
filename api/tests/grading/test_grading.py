@@ -11,7 +11,12 @@ from teachme.domain.models import Chunk, ChunkRecord, Grade, Question, QuestionK
 from teachme.domain.text.normalize import tokenize
 from teachme.grading.evidence import gather_evidence
 from teachme.grading.grader import GradeOut, grade_answer
-from teachme.grading.relevance_check import RelevanceVerdict, check_relevance
+from teachme.grading.relevance_check import (
+    RELEVANCE_MAX_TOKENS,
+    RelevanceVerdict,
+    check_relevance,
+)
+from teachme.ports.llm import LLMOutputTruncated
 from teachme.retrieval.hybrid import HybridSearch
 
 
@@ -36,6 +41,24 @@ def test_check_relevance_request_and_verdict():
     call = llm.calls[0]
     assert call.purpose == "learn.relevance_check" and call.effort == "low"
     assert "<student_answer>" in call.parts[0].text and "I like football" in call.parts[0].text
+
+
+def test_check_relevance_leaves_room_for_adaptive_thinking():
+    """Thinking tokens count towards max_tokens even though only the produced ones bill, so the
+    gate's budget has to cover a thinking block plus a one-word verdict."""
+    llm = FakeLLM({RelevanceVerdict: lambda req: RelevanceVerdict(verdict="on_topic")})
+    check_relevance(llm, "fake-model", _question(), "the ozone layer absorbs it", "en")
+    assert llm.calls[0].max_tokens == RELEVANCE_MAX_TOKENS >= 2000
+
+
+def test_check_relevance_fails_open_to_grading_when_the_verdict_is_truncated():
+    """A truncated gate must not cost the student their answer: unclear routes on to the grader."""
+
+    def truncated(req):
+        raise LLMOutputTruncated("output exceeded max_tokens")
+
+    llm = FakeLLM({RelevanceVerdict: truncated})
+    assert check_relevance(llm, "fake-model", _question(), "the ozone layer absorbs it", "en") == "unclear"
 
 
 def test_gather_evidence_returns_hits_for_question():

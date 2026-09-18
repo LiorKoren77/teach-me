@@ -6,11 +6,13 @@ from pydantic import BaseModel, Field
 
 from teachme.domain.models import Question
 from teachme.grading.prompts import load_prompt
-from teachme.ports.llm import ContentPart, LLMProvider, StructuredRequest
+from teachme.ports.llm import ContentPart, LLMOutputTruncated, LLMProvider, StructuredRequest
 
 Verdict = Literal["on_topic", "off_topic", "unclear"]
 
-RELEVANCE_MAX_TOKENS = 256
+RELEVANCE_MAX_TOKENS = 2000
+"""Thinking tokens count towards max_tokens even though only the produced ones bill, so the
+budget has to cover a thinking block as well as the one-word verdict."""
 
 
 class RelevanceVerdict(BaseModel):
@@ -31,4 +33,9 @@ def check_relevance(llm: LLMProvider, model: str, question: Question, answer: st
         max_tokens=RELEVANCE_MAX_TOKENS,
         effort="low",
     )
-    return llm.generate_structured(request, RelevanceVerdict).output.verdict
+    try:
+        return llm.generate_structured(request, RelevanceVerdict).output.verdict
+    except LLMOutputTruncated:
+        # Fail open: the gate exists to save a grading call, never to cost a student their
+        # answer, and "unclear" routes on to the grader.
+        return "unclear"

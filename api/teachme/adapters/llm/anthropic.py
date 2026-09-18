@@ -52,7 +52,7 @@ class AnthropicLLM:
             model=request.model,
             max_tokens=request.max_tokens,
             system=_system_blocks(request),
-            thinking={"type": "adaptive"},
+            thinking=_thinking(request),
             output_config={"effort": request.effort},
             messages=[{"role": "user", "content": [_to_block(part) for part in request.parts]}],
             output_format=schema,
@@ -86,7 +86,7 @@ class AnthropicLLM:
             model=request.model,
             max_tokens=request.max_tokens,
             system=_system_blocks(request),
-            thinking={"type": "adaptive"},
+            thinking=_thinking(request),
             output_config={"effort": request.effort},
             messages=[{"role": "user", "content": [_to_block(part) for part in request.parts]}],
         ) as stream:
@@ -104,6 +104,13 @@ class AnthropicLLM:
             cache_write_tokens=message.usage.cache_creation_input_tokens or 0,
         )
         return TextResult(text="".join(pieces), usage=usage, model=message.model)
+
+
+def _thinking(request: StructuredRequest | TextRequest) -> dict[str, str]:
+    """Adaptive thinking is billed only for what it produces, but it still counts against
+    max_tokens: at low effort the budget is small enough that a thinking block alone can
+    exhaust it and truncate the answer, so low effort turns thinking off."""
+    return {"type": "disabled"} if request.effort == "low" else {"type": "adaptive"}
 
 
 def _system_blocks(request: StructuredRequest | TextRequest) -> list[dict[str, Any]]:

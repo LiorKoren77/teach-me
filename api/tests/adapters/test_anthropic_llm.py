@@ -77,13 +77,27 @@ def test_builds_request_and_returns_parsed_output():
     assert result.usage.cache_write_tokens == 0 and result.model == "claude-opus-5"
     kwargs = client.calls[0]
     assert kwargs["model"] == "claude-opus-5" and kwargs["max_tokens"] == 4000
-    assert kwargs["thinking"] == {"type": "adaptive"} and kwargs["output_config"] == {"effort": "low"}
+    # a low-effort call's budget is too small to also carry an adaptive thinking block
+    assert kwargs["thinking"] == {"type": "disabled"} and kwargs["output_config"] == {"effort": "low"}
     assert kwargs["output_format"] is Answer
     assert kwargs["system"][0]["cache_control"] == {"type": "ephemeral"}
     content = kwargs["messages"][0]["content"]
     assert content[0]["type"] == "document" and content[0]["source"]["media_type"] == "application/pdf"
     assert content[0]["source"]["data"] == "JVBERi0xLjQ="
     assert content[1] == {"type": "text", "text": "Read it"}
+
+
+def test_thinking_stays_adaptive_above_low_effort():
+    client = _StubClient(_message())
+    request = StructuredRequest(
+        purpose="test",
+        model="claude-opus-5",
+        system="sys",
+        parts=(ContentPart.of_text("x"),),
+        effort="high",
+    )
+    AnthropicLLM(client=client).generate_structured(request, Answer)
+    assert client.calls[0]["thinking"] == {"type": "adaptive"}
 
 
 def test_refusal_and_truncation_raise():
