@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
+import pytest
+from pydantic import ValidationError
+
 from teachme.adapters.file_store.local import LocalFileStore
 from teachme.adapters.file_store.memory import InMemoryFileStore
 from teachme.adapters.file_store.prefixed import PrefixedFileStore
 from teachme.domain.models import Chunk, ChunkRecord, Figure, Page
-from teachme.ingestion.bundle import BundleReader, BundleWriter, SourceMeta, bundle_slug
+from teachme.ingestion.bundle import BundleReader, BundleWriter, ChunkRow, SourceMeta, bundle_slug
 
 
 def test_bundle_slug_is_ascii_and_unique_for_hebrew_names():
@@ -81,6 +84,11 @@ def test_writer_writes_every_store_and_reader_round_trips(tmp_path):
 
     local_reader = BundleReader(LocalFileStore(tmp_path / "geo-1234abcd" / "ch1-abcd1234"), "")
     assert local_reader.pages() == pages
+
+
+def test_chunk_row_rejects_unknown_field():
+    with pytest.raises(ValidationError):
+        ChunkRow(index=0, context="c", text="t", page_start=0, page_end=0, extra="nope")
 
 
 def test_reader_without_embeddings_returns_none():

@@ -33,6 +33,8 @@ class SourceMeta(BaseModel):
 
 
 class ChunkRow(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     index: int
     context: str
     text: str
@@ -41,6 +43,8 @@ class ChunkRow(BaseModel):
 
 
 class EmbeddingRow(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     index: int
     chunk_id: UUID
     model: str
@@ -84,7 +88,10 @@ class BundleWriter:
         self._write(source_slug, "figures.json", payload.encode(), "application/json")
 
     def write_chunks(self, source_slug: str, chunks: Sequence[Chunk]) -> None:
-        rows = [ChunkRow(index=i, **c.model_dump()) for i, c in enumerate(chunks)]
+        rows = [
+            ChunkRow(index=i, context=c.context, text=c.text, page_start=c.page_start, page_end=c.page_end)
+            for i, c in enumerate(chunks)
+        ]
         self._write(source_slug, "chunks.jsonl", _jsonl(rows), "application/x-ndjson")
 
     def write_embeddings(self, source_slug: str, records: Sequence[ChunkRecord]) -> None:
@@ -155,5 +162,5 @@ def _jsonl(rows: Sequence[BaseModel]) -> bytes:
     return ("".join(row.model_dump_json() + "\n" for row in rows)).encode("utf-8")
 
 
-def _read_jsonl(data: bytes, model: type):
+def _read_jsonl[T: BaseModel](data: bytes, model: type[T]) -> list[T]:
     return [model.model_validate_json(line) for line in data.decode("utf-8").splitlines() if line.strip()]
