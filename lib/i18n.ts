@@ -112,6 +112,7 @@ const STRINGS: Record<Language, Strings> = {
     grade: { correct: "Correct", partial: "Partly right", incorrect: "Not right", off_topic: "Off topic", junk: "Unclear" },
     errors: {
       unauthorized: "Your session has ended - signing you in again.", forbidden: "You do not have access to this.",
+      notFound: "That could not be found. It may have been removed.",
       conflict: "This has already moved on. Reload the page to catch up.",
       payloadTooLarge: "That file is too large to upload.", unsupportedType: "That file type is not accepted.",
       rateLimited: "Too many requests. Wait a moment and try again.",
@@ -159,6 +160,7 @@ const STRINGS: Record<Language, Strings> = {
     grade: { correct: "נכון", partial: "נכון חלקית", incorrect: "לא נכון", off_topic: "לא בנושא", junk: "לא ברור" },
     errors: {
       unauthorized: "ההתחברות הסתיימה - מחברים אותך מחדש.", forbidden: "אין לך הרשאה לתוכן הזה.",
+      notFound: "הפריט הזה לא נמצא. ייתכן שהוא הוסר.",
       conflict: "המצב כבר התקדם. רעננו את העמוד.",
       payloadTooLarge: "הקובץ גדול מדי להעלאה.", unsupportedType: "סוג הקובץ אינו נתמך.",
       rateLimited: "יותר מדי בקשות. המתינו רגע ונסו שוב.",
@@ -206,6 +208,7 @@ const STRINGS: Record<Language, Strings> = {
     grade: { correct: "Correto", partial: "Parcialmente correto", incorrect: "Incorreto", off_topic: "Fora do tema", junk: "Pouco claro" },
     errors: {
       unauthorized: "A sua sessão terminou - a iniciar sessão novamente.", forbidden: "Não tem acesso a isto.",
+      notFound: "Isso não foi encontrado. Pode ter sido removido.",
       conflict: "Isto já avançou. Recarregue a página.",
       payloadTooLarge: "Esse ficheiro é demasiado grande para carregar.", unsupportedType: "Esse tipo de ficheiro não é aceite.",
       rateLimited: "Demasiados pedidos. Aguarde um momento e tente novamente.",

@@ -13,19 +13,40 @@ import {
   unpublishSubject,
   uploadSource,
 } from "@/lib/api/admin";
-import type { AdminJob, AdminSource, AdminSubject, AdminSubjectStatus } from "@/lib/api/types";
+import type { AdminJob, AdminLanguageStatus, AdminSource, AdminSubject, AdminSubjectStatus, SourceStatus } from "@/lib/api/types";
 import { useApiError } from "./useApiError";
 
 /** How often something still moving is asked about again. Ingestion steps are far slower. */
 const POLL_MS = 3000;
 /** The two source statuses that never change again on their own. */
-const SETTLED = ["ready", "failed"];
+const SETTLED: SourceStatus[] = ["ready", "failed"];
 /**
  * Upper bound on how many times a job is polled before giving up on it - about two minutes at
  * `POLL_MS`. A job stuck behind a crashed worker would otherwise be asked about forever for as
  * long as the admin screen stays open.
  */
 export const MAX_JOB_POLL_TICKS = 40;
+
+/** A language whose generation has not landed yet: not every part is ready, or a part failed and
+ * the language has not otherwise settled. `publishable` on the status as a whole is the simpler
+ * check once every language agrees, but a run can still be moving in one language while another
+ * is already done. */
+function languageStillGenerating(language: AdminLanguageStatus): boolean {
+  return language.parts_ready < language.parts_total || (language.failed.length > 0 && !language.complete);
+}
+
+/**
+ * Whether a subject's generation is still doing something the pane should keep watching for: the
+ * `generate_subject` job itself only runs the outline and fans the parts out as jobs of their
+ * own, so under the `vercel_function`/`sqs` runners that parent job is `done` long before every
+ * part has actually generated. `publishable` is the simplest "nothing left to wait for" signal,
+ * but is checked defensively against each language too, since a status read moments after the
+ * parent job settles can still show `publishable: false` for reasons unrelated to this run.
+ */
+function subjectStillGenerating(status: AdminSubjectStatus): boolean {
+  if (status.publishable) return false;
+  return status.languages.some(languageStillGenerating);
+}
 
 /**
  * Everything read or written about one subject, tagged with the subject it belongs to. Holding
@@ -71,8 +92,18 @@ export function useAdminActions(subjectId: string | null, onSubjectChanged?: (su
     changed.current = onSubjectChanged;
   }, [onSubjectChanged]);
 
-  /** An answer applied only to the subject it was asked about; a late one for another is dropped. */
+  // Held so a late answer asked about a subject that is no longer the one selected is dropped
+  // outright rather than re-tagging the current state to it - a ref rather than `subjectId`
+  // itself because the effects and callbacks below close over whichever value was current when
+  // the request went out, while this always holds what is selected right now.
+  const selected = useRef(subjectId);
+  useEffect(() => {
+    selected.current = subjectId;
+  }, [subjectId]);
+
+  /** An answer applied only to the subject currently selected; a late one for any other is dropped. */
   const patch = useCallback((id: string, change: Partial<SubjectData>) => {
+    if (id !== selected.current) return;
     setData((previous) => ({ ...(previous.id === id ? previous : { ...EMPTY, id }), ...change }));
   }, []);
 
@@ -106,7 +137,9 @@ export function useAdminActions(subjectId: string | null, onSubjectChanged?: (su
       .then((capabilities) => {
         if (cancelled) return;
         setAccepted(capabilities.accepted_media_types);
-        setMaxUploadBytes(capabilities.max_upload_bytes);
+        // Infinite when the payload carries no cap at all, same as before the answer lands - a
+        // deployment ahead of this client's idea of the schema should not refuse every upload.
+        setMaxUploadBytes(capabilities.max_upload_bytes ?? Number.POSITIVE_INFINITY);
       })
       .catch((failure) => {
         if (!cancelled) fail(failure);
@@ -122,37 +155,87 @@ export function useAdminActions(subjectId: string | null, onSubjectChanged?: (su
   // Ingestion moves a source through its statuses in the background; the list is the progress.
   const ingesting = (current.sources ?? []).some((source) => !SETTLED.includes(source.status));
   useEffect(() => {
-    if (!ingesting) return;
-    const timer = setInterval(() => void refreshSources(), POLL_MS);
-    return () => clearInterval(timer);
-  }, [ingesting, refreshSources]);
+    if (!ingesting || !subjectId) return;
+    let cancelled = false;
+    let ticks = 0;
+    const timer = setInterval(() => {
+      ticks += 1;
+      void refreshSources().then(() => {
+        if (cancelled) return;
+        // Same budget as a followed job: a source wedged behind a crashed worker would
+        // otherwise be asked about for as long as the screen stays open.
+        if (ticks >= MAX_JOB_POLL_TICKS) {
+          patch(subjectId, { jobStale: true });
+          clearInterval(timer);
+        }
+      });
+    }, POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [ingesting, subjectId, refreshSources, patch]);
 
-  // Generation is many jobs behind one; this follows the one that was started, and re-reads the
-  // subject once it settles, which is when the status summary has something new to say.
+  // Generation is many jobs behind one; this follows the one that was started. Under the
+  // vercel_function/sqs runners `generate_subject` itself is done long before every part has -
+  // it only ran the outline and handed each part to a job of its own - so once the followed job
+  // settles this keeps reading the subject's status on the same interval until every language is
+  // ready, giving up the same way a stuck job does: `jobStale`, once its own tick budget runs out.
   const jobId = current.jobId;
   useEffect(() => {
     if (!isSignedIn || !subjectId || !jobId) return;
     let cancelled = false;
     let ticks = 0;
+    // Flips once the followed job itself has settled; from then on each tick re-reads the
+    // subject's status instead of the job, which has nothing left to say.
+    let followingStatus = false;
+    const pollStatus = () => {
+      adminSubjectStatus(subjectId, getToken).then(
+        (status) => {
+          if (cancelled) return;
+          patch(subjectId, { status });
+          if (!subjectStillGenerating(status)) {
+            patch(subjectId, { jobId: null });
+            return;
+          }
+          // Gave up: a crashed or wedged worker would otherwise be polled for as long as the
+          // screen stays open.
+          if (ticks >= MAX_JOB_POLL_TICKS) {
+            patch(subjectId, { jobId: null, jobStale: true });
+          }
+        },
+        (failure) => {
+          if (cancelled) return;
+          patch(subjectId, { jobId: null });
+          fail(failure);
+        },
+      );
+    };
     const tick = () => {
       ticks += 1;
+      if (followingStatus) {
+        pollStatus();
+        return;
+      }
       adminJob(jobId, getToken)
         .then((next) => {
           if (cancelled) return;
           const finished = next.status === "done" || next.status === "failed";
-          if (finished) {
-            patch(subjectId, { job: next, jobId: null, jobStale: false });
-            void refreshSources();
-            void refreshStatus();
+          if (!finished) {
+            // Gave up: a crashed or wedged worker would otherwise be polled for as long as the
+            // screen stays open. The job's own state is kept so the last known status still shows.
+            if (ticks >= MAX_JOB_POLL_TICKS) {
+              patch(subjectId, { job: next, jobId: null, jobStale: true });
+              return;
+            }
+            patch(subjectId, { job: next, jobId });
             return;
           }
-          // Gave up: a crashed or wedged worker would otherwise be polled for as long as the
-          // screen stays open. The job's own state is kept so the last known status still shows.
-          if (ticks >= MAX_JOB_POLL_TICKS) {
-            patch(subjectId, { job: next, jobId: null, jobStale: true });
-            return;
-          }
-          patch(subjectId, { job: next, jobId });
+          patch(subjectId, { job: next, jobStale: false });
+          void refreshSources();
+          followingStatus = true;
+          ticks = 0; // a fresh budget for watching the parts the job only fanned out
+          pollStatus();
         })
         .catch((failure) => {
           if (cancelled) return;
@@ -166,7 +249,7 @@ export function useAdminActions(subjectId: string | null, onSubjectChanged?: (su
       cancelled = true;
       clearInterval(timer);
     };
-  }, [isSignedIn, subjectId, jobId, getToken, patch, fail, refreshSources, refreshStatus]);
+  }, [isSignedIn, subjectId, jobId, getToken, patch, fail, refreshSources]);
 
   /** One action: the screen is busy for its duration and a failure becomes a translated message. */
   const run = useCallback(

@@ -22,8 +22,12 @@ export interface RoundResult { round_no: number; score: number; passed: boolean;
 export interface AnswerResult { accepted: boolean; grade: Grade | null; feedback: string; rejection_reason: string | null; next_question: QuestionView | null; round_result: RoundResult | null; }
 export interface PartSession { part: RenderedPart; status: PartStatus; attempt_id: string | null; round_no: number; current_question: QuestionView | null; last_round: RoundResult | null; reexplanation: string | null; }
 export interface StudentSource { filename: string; media_type: string; page_count: number | null; }
-export interface AdminSubject { id: string; name: string; state: string; languages: Language[]; current_outline_version: number | null; }
-export interface AdminSource { id: string; filename: string; media_type: string; status: string; page_count: number | null; detected_language: string | null; error: string | null; }
+/** Mirrors api/teachme/domain/models.py's SubjectState. */
+export type SubjectState = "draft" | "published";
+/** Mirrors api/teachme/domain/models.py's SourceStatus - the six steps a source moves through. */
+export type SourceStatus = "uploaded" | "extracting" | "chunking" | "indexing" | "ready" | "failed";
+export interface AdminSubject { id: string; name: string; state: SubjectState; languages: Language[]; current_outline_version: number | null; }
+export interface AdminSource { id: string; filename: string; media_type: string; status: SourceStatus; page_count: number | null; detected_language: string | null; error: string | null; }
 export interface UsageRow { purpose: string; model: string; calls: number; input_tokens: number; output_tokens: number; cache_read_tokens: number; cache_write_tokens: number; cost_usd: number; avg_latency_ms: number; }
 
 // --- Admin upload pane (stage 5) -------------------------------------------------------------
@@ -34,7 +38,9 @@ export interface UsageRow { purpose: string; model: string; calls: number; input
 /** The media types `SourceService` accepts, for the file picker's `accept`, and the per-file size cap. */
 export interface AdminCapabilities { accepted_media_types: string[]; max_upload_bytes: number; }
 export type JobStatus = "queued" | "running" | "done" | "failed";
-export interface AdminJob { id: string; kind: string; status: JobStatus; attempts: number; error: string | null; }
+/** Mirrors the job kinds api/teachme/services/generation_jobs.py and the ingestion pipeline enqueue. */
+export type JobKind = "ingest_source" | "generate_subject" | "generate_unit";
+export interface AdminJob { id: string; kind: JobKind; status: JobStatus; attempts: number; error: string | null; }
 /** What an upload answers with: the registered source, plus the ingestion job now queued for it. */
 export interface AdminUpload extends AdminSource { job_id: string; }
 export interface AdminJobRef { job_id: string; }

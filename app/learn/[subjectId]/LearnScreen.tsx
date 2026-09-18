@@ -78,6 +78,23 @@ export function LearnScreen({ subjectId }: { subjectId: string }) {
       {error ? <p className="text-sm text-red-700">{strings.errors[error]}</p> : null}
       {stream.error ? <p className="text-sm text-red-700">{strings.errors[stream.error]}</p> : null}
 
+      {/* Offered to an admin regardless of whether a session exists: a fresh draft subject has
+          no outline yet, so there is nothing for `useLearningSession` to start, but its sources
+          still need somewhere to be uploaded. */}
+      {admin && draft ? (
+        <UploadPane
+          sources={authoring.sources ?? []}
+          acceptedMediaTypes={authoring.acceptedMediaTypes}
+          maxUploadBytes={authoring.maxUploadBytes}
+          published={authoring.published}
+          busy={authoring.busy}
+          strings={strings}
+          onUpload={authoring.upload}
+          onDelete={authoring.remove}
+          onReingest={authoring.reingest}
+        />
+      ) : null}
+
       {session ? (
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_280px]">
           <main className="flex flex-col gap-6">
@@ -109,19 +126,6 @@ export function LearnScreen({ subjectId }: { subjectId: string }) {
           </main>
           <aside className="flex flex-col gap-6">
             <SourceList sources={sources ?? []} strings={strings} />
-            {admin && draft ? (
-              <UploadPane
-                sources={authoring.sources ?? []}
-                acceptedMediaTypes={authoring.acceptedMediaTypes}
-                maxUploadBytes={authoring.maxUploadBytes}
-                published={authoring.published}
-                busy={authoring.busy}
-                strings={strings}
-                onUpload={authoring.upload}
-                onDelete={authoring.remove}
-                onReingest={authoring.reingest}
-              />
-            ) : null}
           </aside>
         </div>
       ) : null}

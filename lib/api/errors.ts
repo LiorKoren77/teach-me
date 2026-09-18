@@ -4,6 +4,7 @@ import { ApiError } from "./client";
 export type ErrorKey =
   | "unauthorized"
   | "forbidden"
+  | "notFound"
   | "conflict"
   | "payloadTooLarge"
   | "unsupportedType"
@@ -19,6 +20,7 @@ export function errorKeyOf(failure: unknown): ErrorKey {
   const status = failure instanceof ApiError ? failure.status : 0;
   if (status === 401) return "unauthorized";
   if (status === 403) return "forbidden";
+  if (status === 404) return "notFound";
   if (status === 409) return "conflict";
   if (status === 413) return "payloadTooLarge";
   if (status === 415) return "unsupportedType";
