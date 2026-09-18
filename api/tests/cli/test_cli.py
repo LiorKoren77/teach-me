@@ -139,3 +139,30 @@ def test_ingest_survives_a_corrupt_pdf(cli):
 
     result = runner.invoke(app, ["source", "list", "--subject", "Geo"])
     assert result.output.count(": ready") == 1
+
+
+def test_generate_publish_show_flow(cli):
+    app, pdf, tmp_path = cli
+    assert runner.invoke(app, ["ingest", "--subject", "Geo", "--yes", str(pdf)]).exit_code == 0
+    result = runner.invoke(app, ["generate", "--subject", "Geo"])
+    assert result.exit_code == 0, result.output
+    assert "outline v1" in result.output and "he" in result.output and "ready" in result.output
+
+    result = runner.invoke(app, ["tutorial", "status", "--subject", "Geo"])
+    assert result.exit_code == 0 and "publishable: yes" in result.output
+
+    result = runner.invoke(app, ["publish", "--subject", "Geo"])
+    assert result.exit_code == 0 and "published" in result.output
+
+    result = runner.invoke(app, ["tutorial", "show", "--subject", "Geo", "--language", "he", "--part", "0"])
+    assert result.exit_code == 0 and "Fake part title" in result.output and "{{term:" not in result.output
+
+    result = runner.invoke(app, ["generate", "--subject", "Geo"])
+    assert result.exit_code == 1 and "published" in result.output
+
+    result = runner.invoke(app, ["unpublish", "--subject", "Geo"])
+    assert result.exit_code == 0 and "draft" in result.output
+    result = runner.invoke(
+        app, ["generate", "--subject", "Geo", "--language", "he", "--part", "0", "--content-only"]
+    )
+    assert result.exit_code == 0 and "outline v1" in result.output

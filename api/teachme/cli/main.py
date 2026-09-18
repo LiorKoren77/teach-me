@@ -10,6 +10,7 @@ import typer
 from teachme.adapters.db.migrate import SchemaOutOfDate, apply_migrations, ensure_schema_current
 from teachme.container import ConfigurationError, Container
 from teachme.domain.models import Source
+from teachme.generation.errors import GenerationError
 from teachme.ingestion.errors import ExtractionError, IngestionError, SubjectLocked, UnsupportedMediaType
 from teachme.ingestion.estimate import estimate_ingest
 from teachme.ingestion.pdf_pages import page_count
@@ -20,8 +21,10 @@ from teachme.services.subjects import LanguageNotEnabled
 app = typer.Typer(no_args_is_help=True, help="teach-me operator commands")
 subject_app = typer.Typer(no_args_is_help=True, help="Manage subjects")
 source_app = typer.Typer(no_args_is_help=True, help="Manage sources")
+tutorial_app = typer.Typer(no_args_is_help=True, help="Inspect the generated tutorial")
 app.add_typer(subject_app, name="subject")
 app.add_typer(source_app, name="source")
+app.add_typer(tutorial_app, name="tutorial")
 
 _OPERATOR_ERRORS = (
     NotFound,
@@ -31,6 +34,7 @@ _OPERATOR_ERRORS = (
     IngestionError,
     FileNotFound,
     ConfigurationError,
+    GenerationError,
 )
 
 
@@ -240,5 +244,94 @@ def usage(subject: str | None = typer.Option(None, "--subject", "-s")) -> None:
     def body(c: Container) -> None:
         subject_id = c.subject_service.require(subject).id if subject else None
         typer.echo(c.usage_service.format_table(c.usage_service.summary(subject_id)))
+
+    _run(body)
+
+
+@app.command()
+def generate(
+    subject: str = typer.Option(..., "--subject", "-s"),
+    language: list[str] = typer.Option(None, "--language", "-l", help="Repeatable; default: all enabled"),
+    part: list[int] = typer.Option(None, "--part", "-p", help="Repeatable part positions; default: all"),
+    content_only: bool = typer.Option(False, "--content-only", help="Keep the current outline and glossary"),
+) -> None:
+    """Generate outline, glossary, teaching text and question bank for a subject."""
+
+    def body(c: Container) -> None:
+        c.check_ready()
+        subj = c.subject_service.require(subject)
+        report = c.tutorial_service.generate(
+            subj, languages=language or None, parts=part or None, content_only=content_only
+        )
+        typer.echo(f"{subj.name}: outline v{report.outline_version}{' (new)' if report.new_outline else ''}")
+        for r in report.results:
+            line = (
+                f"  part {r.part_position} [{r.language}]: {r.content_status.value}, {r.questions} questions"
+            )
+            typer.echo(line + (f"  error: {r.error}" if r.error else ""))
+        if report.failures:
+            raise typer.Exit(code=1)
+
+    _run(body)
+
+
+@app.command()
+def publish(subject: str = typer.Option(..., "--subject", "-s")) -> None:
+    """Lock sources and make the subject visible to students. Requires complete content in every language."""
+
+    def body(c: Container) -> None:
+        subj = c.subject_service.require(subject)
+        published = c.tutorial_service.publish(subj)
+        typer.echo(f"{published.name}: published outline v{published.current_outline_version}")
+
+    _run(body)
+
+
+@app.command()
+def unpublish(subject: str = typer.Option(..., "--subject", "-s")) -> None:
+    """Return a published subject to draft so it can be regenerated."""
+
+    def body(c: Container) -> None:
+        draft = c.tutorial_service.unpublish(c.subject_service.require(subject))
+        typer.echo(f"{draft.name}: {draft.state.value}")
+
+    _run(body)
+
+
+@tutorial_app.command("status")
+def tutorial_status(subject: str = typer.Option(..., "--subject", "-s")) -> None:
+    """Report generation and publish readiness per language."""
+
+    def body(c: Container) -> None:
+        status = c.tutorial_service.status(c.subject_service.require(subject))
+        typer.echo(
+            f"{status.subject}: {status.state.value}, outline v{status.outline_version}, "
+            f"published v{status.published_version}, {status.parts} parts"
+        )
+        for lang in status.languages:
+            typer.echo(
+                f"  {lang.language}: {lang.parts_ready}/{lang.parts_total} parts ready, "
+                f"{lang.questions} questions, complete: {'yes' if lang.complete else 'no'}"
+            )
+        typer.echo(f"publishable: {'yes' if status.publishable else 'no'}")
+
+    _run(body)
+
+
+@tutorial_app.command("show")
+def tutorial_show(
+    subject: str = typer.Option(..., "--subject", "-s"),
+    language: str = typer.Option(..., "--language", "-l"),
+    part: int = typer.Option(0, "--part", "-p"),
+) -> None:
+    """Print a part's rendered teaching text as a student would receive it."""
+
+    def body(c: Container) -> None:
+        rendered = c.tutorial_service.rendered_part(c.subject_service.require(subject), language, part)
+        typer.echo(f"# {rendered.title}\n")
+        typer.echo(rendered.body)
+        typer.echo("\n## Key points")
+        for point in rendered.key_points:
+            typer.echo(f"- {point}")
 
     _run(body)
