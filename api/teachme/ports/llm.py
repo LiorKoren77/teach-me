@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Generic, Literal, Protocol, TypeVar
+from typing import Literal, Protocol, TypeVar
 
 from pydantic import BaseModel
 
@@ -73,7 +73,7 @@ class LLMUsage:
 
 
 @dataclass(frozen=True)
-class StructuredResult(Generic[T]):
+class StructuredResult[T: BaseModel]:
     output: T
     usage: LLMUsage
     model: str

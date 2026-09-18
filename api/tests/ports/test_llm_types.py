@@ -13,7 +13,9 @@ def test_content_part_constructors():
 
 
 def test_request_defaults():
-    req = StructuredRequest(purpose="test", model="claude-opus-5", system="s", parts=(ContentPart.of_text("x"),))
+    req = StructuredRequest(
+        purpose="test", model="claude-opus-5", system="s", parts=(ContentPart.of_text("x"),)
+    )
     assert req.max_tokens == 16000
     assert req.effort == "medium"
 

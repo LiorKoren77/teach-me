@@ -7,7 +7,9 @@ from teachme.domain.retrieval.fusion import reciprocal_rank_fusion
 
 
 def hit(chunk_id, score=1.0):
-    return ChunkHit(chunk_id=chunk_id, source_id=uuid4(), content=str(chunk_id), page_start=0, page_end=0, score=score)
+    return ChunkHit(
+        chunk_id=chunk_id, source_id=uuid4(), content=str(chunk_id), page_start=0, page_end=0, score=score
+    )
 
 
 def test_item_in_both_lists_ranks_first():
