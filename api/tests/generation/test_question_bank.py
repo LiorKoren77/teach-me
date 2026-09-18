@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from teachme.adapters.llm.fake import FakeLLM
 from teachme.domain.models import QuestionKind
 from teachme.generation.question_bank import (
@@ -85,6 +87,47 @@ def test_validate_bank():
         ]
     )
     assert any("correct_choice" in e for e in validate_bank(bad_mc, sections, slugs, min_per_section=0))
+
+
+def test_validate_bank_rejects_correct_choice_on_free_text_without_choices():
+    part, sections, terms = _structure()
+    slugs = {t.slug for t in terms}
+    bad_free_text = QuestionBankOut(
+        questions=[
+            QuestionOut(
+                section_position=0,
+                kind=QuestionKind.FREE_TEXT,
+                prompt="p",
+                expected_answer="a",
+                rubric=["r"],
+                key_terms=[],
+                exact_values=[],
+                choices=None,
+                correct_choice=0,
+            )
+        ]
+    )
+    errors = validate_bank(bad_free_text, sections, slugs, min_per_section=0)
+    assert any("free_text" in e and "choices" in e for e in errors)
+
+
+def test_to_questions_raises_clear_error_for_unknown_section_position():
+    part, sections, terms = _structure()
+    bad_pos = QuestionBankOut(
+        questions=[
+            QuestionOut(
+                section_position=9,
+                kind=QuestionKind.FREE_TEXT,
+                prompt="p",
+                expected_answer="a",
+                rubric=["r"],
+                key_terms=[],
+                exact_values=[],
+            )
+        ]
+    )
+    with pytest.raises(ValueError, match="9"):
+        to_questions(bad_pos, sections, "he", {}, {})
 
 
 def test_augment_key_terms_adds_glossary_forms():

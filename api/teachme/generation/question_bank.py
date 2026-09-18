@@ -53,7 +53,7 @@ def validate_bank(
                 errors.append(f"question {i}: multiple_choice needs exactly {MC_CHOICES} choices")
             if q.correct_choice is None or not q.choices or not 0 <= q.correct_choice < len(q.choices):
                 errors.append(f"question {i}: correct_choice must index into choices")
-        elif q.choices is not None:
+        elif q.choices is not None or q.correct_choice is not None:
             errors.append(f"question {i}: free_text must not have choices")
         for text in (q.prompt, q.expected_answer):
             for slug, _ in find_placeholders(text):
@@ -88,23 +88,30 @@ def to_questions(
     target_terms: Mapping[str, str],
 ) -> list[Question]:
     by_position = {s.position: s.id for s in sections}
-    return [
-        Question(
-            id=uuid4(),
-            section_id=by_position[q.section_position],
-            language=language,
-            kind=q.kind,
-            prompt=q.prompt,
-            expected_answer=q.expected_answer,
-            rubric=tuple(q.rubric),
-            key_terms=augment_key_terms(q, source_terms, target_terms),
-            exact_values=tuple(q.exact_values),
-            choices=tuple(q.choices) if q.choices else None,
-            correct_choice=q.correct_choice,
-            position=i,
+    questions = []
+    for i, q in enumerate(out.questions):
+        if q.section_position not in by_position:
+            raise ValueError(
+                f"question {i}: unknown section position {q.section_position}; expected one of"
+                f" {sorted(by_position)}"
+            )
+        questions.append(
+            Question(
+                id=uuid4(),
+                section_id=by_position[q.section_position],
+                language=language,
+                kind=q.kind,
+                prompt=q.prompt,
+                expected_answer=q.expected_answer,
+                rubric=tuple(q.rubric),
+                key_terms=augment_key_terms(q, source_terms, target_terms),
+                exact_values=tuple(q.exact_values),
+                choices=tuple(q.choices) if q.choices else None,
+                correct_choice=q.correct_choice,
+                position=i,
+            )
         )
-        for i, q in enumerate(out.questions)
-    ]
+    return questions
 
 
 def render_brief(
