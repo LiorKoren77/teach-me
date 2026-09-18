@@ -381,17 +381,17 @@ class LearningService:
         try:
             with usage_context(subject_id=subject.id, user_id=user_id, attempt_id=attempt.id):
                 result = reexplain_sections(
-                    self.d.llm,
-                    self.d.settings.model_reexplain,
-                    subject.name,
-                    attempt.language,
-                    self._corpus(subject),
-                    part,
-                    sections,
-                    summaries,
-                    wrong,
-                    terms,
-                    by_slug,
+                    llm=self.d.llm,
+                    model=self.d.settings.model_reexplain,
+                    subject_name=subject.name,
+                    language=attempt.language,
+                    corpus=self._corpus(subject),
+                    part=part,
+                    sections=sections,
+                    summaries=summaries,
+                    wrong=wrong,
+                    terms=terms,
+                    translations=by_slug,
                     on_delta=on_delta,
                 )
             stored = self.d.attempts.add_reexplanation(

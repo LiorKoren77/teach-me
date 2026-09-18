@@ -27,8 +27,8 @@ def render_brief(
     translations: Mapping[str, str],
     corpus: SubjectCorpus,
 ) -> str:
-    """Unlike the teaching brief this one restates pages, but only the weak sections' ones: the
-    whole corpus is already the cached prefix, and naming the pages again focuses the model."""
+    """Unlike the teaching brief this one restates pages, but only the weak sections' ones: those
+    pages, the original summaries and the student's wrong answers are the model's whole source."""
     by_id = {s.section_id: s for s in summaries}
     lines = [f"PART: {part.title}"]
     for s in sections:
@@ -45,6 +45,7 @@ def render_brief(
 
 
 def reexplain_sections(
+    *,
     llm: LLMProvider,
     model: str,
     subject_name: str,
@@ -56,9 +57,10 @@ def reexplain_sections(
     wrong: Sequence[WrongAnswer],
     terms: Sequence[GlossaryTerm],
     translations: Mapping[str, str],
-    *,
     on_delta: OnDelta,
 ) -> TextResult:
+    """Re-teach the weak sections. The brief carries their pages, so nothing is cached: caching
+    the whole corpus for a few pages pays a write of the entire subject on every failed round."""
     if not sections:
         raise ValueError("no weak sections to re-explain")
     request = TextRequest(
@@ -68,7 +70,6 @@ def reexplain_sections(
         parts=(
             ContentPart.of_text(render_brief(part, sections, summaries, wrong, terms, translations, corpus)),
         ),
-        cached_context=corpus.render(),
         max_tokens=REEXPLAIN_MAX_TOKENS,
         effort="high",
     )
