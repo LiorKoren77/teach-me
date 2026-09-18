@@ -239,13 +239,29 @@ class AttemptRepository:
         return int(row["rejections"]) if row else 0
 
     def submissions_since_seconds(self, user_id: str, seconds: int) -> int:
-        """Answers and rejections in the window: a rejected submission is what the rate limit is
-        there for, since an off-topic answer can still reach the relevance check."""
+        """Answers and rejections in the window - submissions, not questions touched.
+
+        A rejected submission is what the rate limit is there for, since an off-topic answer can
+        still reach the relevance check: counting rows instead would have scored N rejections plus
+        a final answer on one question as a single submission, and the limit would be off by
+        however many times a student retried.
+
+        Rejections carry only their last timestamp, so the count of rejections inside the window
+        is approximated by the row's whole `rejections` counter whenever its last rejection falls
+        in the window. That over-counts a question whose earlier rejections predate the window,
+        which errs towards refusing a student who is hammering one question - the case the limit
+        exists for - and never towards letting more model calls through than configured.
+        """
         row = self._conn.execute(
-            "SELECT count(*) AS n FROM attempt_questions aq JOIN attempts a ON a.id = aq.attempt_id"
-            " WHERE a.user_id = %s AND greatest(aq.answered_at, aq.last_rejected_at)"
-            " >= now() - make_interval(secs => %s)",
-            (user_id, seconds),
+            "WITH rate_window AS (SELECT now() - make_interval(secs => %s) AS start)"
+            " SELECT coalesce(sum("
+            "   coalesce((aq.answered_at >= w.start)::int, 0)"
+            "   + CASE WHEN aq.last_rejected_at >= w.start THEN aq.rejections ELSE 0 END"
+            " ), 0) AS n"
+            " FROM attempt_questions aq JOIN attempts a ON a.id = aq.attempt_id"
+            " CROSS JOIN rate_window w"
+            " WHERE a.user_id = %s AND greatest(aq.answered_at, aq.last_rejected_at) >= w.start",
+            (seconds, user_id),
         ).fetchone()
         return int(row["n"])
 

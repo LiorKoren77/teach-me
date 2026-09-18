@@ -101,7 +101,8 @@ def test_attempts_lifecycle(db):
     assert answered[0].feedback == "ok" and answered[0].rubric_covered == (0,)
     assert repo.next_unanswered(attempt.id) is None
     assert repo.asked_question_ids(attempt.id) == {q.id}
-    assert repo.submissions_since_seconds("user_1", 60) == 1
+    # one rejection plus one answer on the same question is two submissions, not one question
+    assert repo.submissions_since_seconds("user_1", 60) == 2
     repo.add_reexplanation(
         attempt.id, round_no=1, section_ids=[q.section_id], language="he", body="again", model="m"
     )

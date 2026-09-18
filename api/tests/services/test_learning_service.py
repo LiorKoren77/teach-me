@@ -412,10 +412,33 @@ def test_rejections_are_stored_bounded_and_count_toward_the_rate_limit(env):
     assert stored.route == Route.REJECT_OFF_TOPIC and stored.check_verdict == "off_topic"
     assert stored.relevance_band is not None and stored.grade is None and stored.rejections == 2
 
-    # a non-final off-topic rejection still costs a relevance-check call, so it is rate limited
-    # (the window counts questions submitted to, and a rejection alone used to count for nothing)
-    assert c.attempts.submissions_since_seconds(USER, 60) == 1
+    # a non-final off-topic rejection still costs a relevance-check call, so it is rate limited:
+    # both rejections count, where the window used to count the question once however often it
+    # was submitted to
+    assert c.attempts.submissions_since_seconds(USER, 60) == 2
     c.settings.max_answers_per_minute = 1
+    with pytest.raises(NotAllowed, match="rate"):
+        c.learning_service.submit_answer(
+            USER, session.attempt_id, question.attempt_question_id, answer_text="pizza again tonight"
+        )
+
+
+def test_the_rate_limit_counts_submissions_not_questions_touched(env):
+    """Two rejections of one question are two submissions - each paid for a relevance check - so
+    the third submission is refused with the limit at two."""
+    c, subject, fake = env
+    fake.set_responder(RelevanceVerdict, lambda req: RelevanceVerdict(verdict="off_topic"))
+    c.settings.max_rejections_per_question = 5
+    c.settings.max_answers_per_minute = 2
+    session = c.learning_service.start_part(USER, subject, position=0, language="en")
+    question = c.learning_service.begin_round(USER, session.attempt_id)
+
+    for _ in range(2):
+        rejected = c.learning_service.submit_answer(
+            USER, session.attempt_id, question.attempt_question_id, answer_text="I love football tonight"
+        )
+        assert not rejected.accepted
+    assert c.attempts.submissions_since_seconds(USER, 60) == 2
     with pytest.raises(NotAllowed, match="rate"):
         c.learning_service.submit_answer(
             USER, session.attempt_id, question.attempt_question_id, answer_text="pizza again tonight"
