@@ -49,6 +49,7 @@ def test_writer_lays_out_subject_level_files():
             key_points=("a",),
             status=ContentStatus.READY,
             model="fake-model",
+            page_refs=(0, 2),
         ),
     )
     writer.write_questions(
@@ -82,7 +83,9 @@ def test_writer_lays_out_subject_level_files():
     assert doc.version == 2 and doc.parts[0].sections[0].title == "What"
 
     md = store.get("geo-12345678/v2/parts/01.he.md").decode()
-    assert md.startswith("<!-- teach-me part position=0 language=he model=fake-model status=ready -->\n\n")
+    assert md.startswith(
+        "<!-- teach-me part position=0 language=he model=fake-model status=ready page_refs=[0,2] -->\n\n"
+    )
     assert "# מבוא" in md and "{{term:biosphere|x}} body" in md
     assert "## Key points" in md and "- a" in md
 
@@ -135,7 +138,7 @@ def test_write_part_content_writes_a_failed_stub_with_no_body():
     )
     md = store.get("geo-12345678/v1/parts/01.he.md").decode()
     assert md == (
-        "<!-- teach-me part position=0 language=he model=fake-model status=failed"
+        "<!-- teach-me part position=0 language=he model=fake-model status=failed page_refs=[]"
         ' error="teaching service down" -->\n'
     )
     assert "#" not in md and "Key points" not in md

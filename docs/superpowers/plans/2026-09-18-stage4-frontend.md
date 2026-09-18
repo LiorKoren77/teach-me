@@ -538,7 +538,7 @@ export interface PartView { part_id: string; position: number; title: string; st
 export interface SubjectView { subject_id: string; name: string; languages: Language[]; parts: PartView[]; }
 export interface SectionContent { section_id: string; language: string; title: string; summary: string; }
 export interface GlossaryEntry { slug: string; term: string; source_term: string; definition: string; }
-export interface RenderedPart { position: number; title: string; body: string; key_points: string[]; sections: SectionContent[]; glossary: GlossaryEntry[]; }
+export interface RenderedPart { position: number; title: string; body: string; key_points: string[]; page_refs: number[]; sections: SectionContent[]; glossary: GlossaryEntry[]; }
 export interface QuestionView { attempt_question_id: string; question_id: string; position: number; round_no: number; total_in_round: number; kind: QuestionKind; prompt: string; choices: string[] | null; }
 export interface RoundResult { round_no: number; score: number; passed: boolean; status: PartStatus; rounds_left: number; weak_section_titles: string[]; }
 export interface AnswerResult { accepted: boolean; grade: Grade | null; feedback: string; rejection_reason: string | null; next_question: QuestionView | null; round_result: RoundResult | null; }
@@ -1096,3 +1096,9 @@ git checkout main && git merge --ff-only stage-4-frontend && git push origin mai
 - Section 8: routes `/`, `/learn/[subjectId]`, `/admin` (Tasks 5, 7, 8); layout with tabs, progress strip, teaching over dialog, right source pane, stacking on narrow screens (Task 7); components one per file with plain props (Tasks 6, 7, 8); hooks per concern with Clerk token and SSE (Tasks 4, 7); language choice remembered and RTL at the root (Tasks 4, 5); UI strings from one translations file (Task 4); thumbnails on page references (Tasks 1, 6); one question at a time, feedback, rejections reopen the box, failed round streams the re-explanation, passed round unlocks (Task 7); student text rendered as plain text (Task 7); no free chat, no client-side scoring, no persistence beyond language (all).
 - Section 9 eval harness: Task 3.
 - Deferred: admin upload pane (stage 5, optional), federation (before students).
+
+---
+
+## Deviations recorded during execution
+
+- Page references became an explicit contract rather than something the frontend scrapes out of the prose. `TeachingOut` (and `PartContent`, `RenderedPart`, the `part_content.page_refs` column added by migration `0005_page_refs.sql`, and the subject bundle's part markdown header) now carries `page_refs`: the global corpus page indices of the pages whose figures, maps or tables the teaching text points at. `validate_teaching` refuses an index outside the part's page range or a duplicate, which spends the one retry. The prompt splits the two jobs: the prose names a page by its `printed` number when the page has one (and describes the figure and its position when it does not), never by the global index, while `page_refs` returns the global index of each of those same pages. The frontend consumes `page_refs` for the thumbnails it shows next to the teaching text - it is exactly what `GET /api/subjects/{subject_id}/pages/{global_index}/image` takes - and falls back to a prose scan for page numbers only until the field is mandatory on every stored part (older content generated before this migration has an empty array).

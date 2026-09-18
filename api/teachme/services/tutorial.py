@@ -99,6 +99,8 @@ class RenderedPart(BaseModel):
     title: str
     body: str
     key_points: tuple[str, ...]
+    # Global corpus page indices the body points at, for GET /api/subjects/{id}/pages/{i}/image.
+    page_refs: tuple[int, ...]
     sections: list[SectionContent]
     glossary: list[GlossaryEntry]
 
@@ -298,6 +300,7 @@ class TutorialService:
                 key_points=tuple(teaching.key_points),
                 status=ContentStatus.READY,
                 model=model,
+                page_refs=tuple(teaching.page_refs),
             )
             self._content.upsert_part(content)
             by_position = {s.position: s.id for s in sections}
@@ -545,6 +548,7 @@ class TutorialService:
             title=content.title,
             body=body,
             key_points=content.key_points,
+            page_refs=content.page_refs,
             sections=self._content.sections(part.id, language),
             glossary=[
                 GlossaryEntry(

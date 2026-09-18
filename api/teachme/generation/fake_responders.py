@@ -15,6 +15,7 @@ from teachme.ports.llm import StructuredRequest, TextRequest
 _ALL_PAGES = re.compile(r"all (\d+) pages")
 _PAGE_RANGE = re.compile(r"pages (\d+)-(\d+)")
 _SECTION = re.compile(r"^SECTION (\d+): (.+?) \(pages (\d+)-(\d+)\)$", re.MULTILINE)
+_PART_PAGES = re.compile(r"^PAGES: (\d+)-(\d+)$", re.MULTILINE)
 _TERM = re.compile(r"^TERM: ([a-z0-9-]+) \| ([^|]+?) \| (.+)$", re.MULTILINE)
 _COUNT = re.compile(r"^COUNT: (\d+)$", re.MULTILINE)
 
@@ -106,10 +107,16 @@ def _teaching(request: StructuredRequest) -> BaseModel:
     slugs = [m.group(1) for m in _TERM.finditer(text)]
     placeholder = f"{{{{term:{slugs[0]}|fake-words}}}}" if slugs else ""
     body = f"# Fake teaching\n\n{placeholder} " + "Fake teaching sentence. " * 30
+    pages = _PART_PAGES.search(text)
+    if pages is None:
+        raise ValueError("gen.teaching: no PAGES line in the teaching brief")
+    # One reference, the part's first page: enough for the fake stack to exercise page_refs end to
+    # end, and always inside the range validate_teaching checks.
     return TeachingOut(
         title="Fake part title",
         body_markdown=body,
         key_points=["point 1", "point 2", "point 3"],
+        page_refs=[int(pages.group(1))],
         sections=[
             SectionContentOut(position=pos, title=f"Fake {title}", summary="Fake summary.")
             for pos, title in sections

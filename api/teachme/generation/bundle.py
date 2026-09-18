@@ -129,9 +129,10 @@ class SubjectBundleWriter:
             raise ValueError(
                 f"content.part_id {content.part_id} does not match part {part.id} (position {part.position})"
             )
+        refs = ",".join(str(i) for i in content.page_refs)
         header = (
             f"<!-- teach-me part position={part.position} language={content.language}"
-            f" model={content.model} status={content.status.value}"
+            f" model={content.model} status={content.status.value} page_refs=[{refs}]"
         )
         if content.error:
             header += f" error={json.dumps(content.error)}"

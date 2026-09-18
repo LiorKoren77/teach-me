@@ -111,6 +111,7 @@ def test_part_and_section_content(db):
             key_points=("a", "b"),
             status=ContentStatus.READY,
             model="fake-model",
+            page_refs=(0, 2),
         )
     )
     content.upsert_sections(
@@ -121,6 +122,7 @@ def test_part_and_section_content(db):
     )
     loaded = content.part(parts[0].id, "he")
     assert loaded is not None and loaded.title == "מבוא" and loaded.key_points == ("a", "b")
+    assert loaded.page_refs == (0, 2)  # the page images the teaching text points at
     assert content.part(parts[0].id, "en") is None
     assert [s.title for s in content.sections(parts[0].id, "he")] == ["מה", "למה"]
     content.upsert_part(loaded.model_copy(update={"status": ContentStatus.FAILED, "error": "boom"}))

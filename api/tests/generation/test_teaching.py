@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from teachme.adapters.llm.fake import FakeLLM
 from teachme.domain.models import GlossaryTerm, Part, Section
+from teachme.generation.prompts import load_prompt
 from teachme.generation.teaching import (
     SectionContentOut,
     TeachingOut,
@@ -34,7 +35,7 @@ def _structure():
     return part, sections, terms
 
 
-def _good(body="x" * 300):
+def _good(body="x" * 300, page_refs=(0, 2)):
     return TeachingOut(
         title="מבוא",
         body_markdown=body,
@@ -43,23 +44,39 @@ def _good(body="x" * 300):
             SectionContentOut(position=0, title="מה", summary="s"),
             SectionContentOut(position=1, title="למה", summary="s"),
         ],
+        page_refs=list(page_refs),
     )
 
 
 def test_validate_teaching():
     part, sections, terms = _structure()
     slugs = {t.slug for t in terms}
-    assert validate_teaching(_good("{{term:biosphere|הביוספרה}} " + "x" * 300), sections, slugs) == []
+    assert validate_teaching(_good("{{term:biosphere|הביוספרה}} " + "x" * 300), part, sections, slugs) == []
     short = _good("tiny")
-    assert any("too short" in e for e in validate_teaching(short, sections, slugs))
+    assert any("too short" in e for e in validate_teaching(short, part, sections, slugs))
     missing_section = _good().model_copy(
         update={"sections": [SectionContentOut(position=0, title="t", summary="s")]}
     )
-    assert any("sections" in e for e in validate_teaching(missing_section, sections, slugs))
+    assert any("sections" in e for e in validate_teaching(missing_section, part, sections, slugs))
     unknown = _good("{{term:ghost|x}} " + "x" * 300)
     assert any(
-        "unknown glossary slug" in e and "ghost" in e for e in validate_teaching(unknown, sections, slugs)
+        "unknown glossary slug" in e and "ghost" in e
+        for e in validate_teaching(unknown, part, sections, slugs)
     )
+
+
+def test_validate_teaching_checks_page_refs_against_the_parts_range():
+    part, sections, terms = _structure()  # the part covers global pages 0-3
+    slugs = {t.slug for t in terms}
+    body = "{{term:biosphere|הביוספרה}} " + "x" * 300
+    assert validate_teaching(_good(body, page_refs=()), part, sections, slugs) == []
+    assert validate_teaching(_good(body, page_refs=(3, 0)), part, sections, slugs) == []
+    outside = validate_teaching(_good(body, page_refs=(1, 4)), part, sections, slugs)
+    assert any("page_refs" in e and "4" in e and "0-3" in e for e in outside)
+    below = validate_teaching(_good(body, page_refs=(-1,)), part, sections, slugs)
+    assert any("page_refs" in e and "-1" in e for e in below)
+    duplicated = validate_teaching(_good(body, page_refs=(1, 1)), part, sections, slugs)
+    assert any("page_refs" in e and "duplicate" in e for e in duplicated)
 
 
 def test_render_brief_lists_sections_and_glossary_and_pages():
@@ -81,8 +98,31 @@ def test_generate_teaching_uses_cached_corpus_and_language():
     out = generate_teaching(
         llm, "fake-model", "Geo", "he", corpus, part, sections, terms, {"biosphere": "ביוספרה"}
     )
-    assert out.title == "מבוא"
+    assert out.title == "מבוא" and out.page_refs == [0, 2]
     call = llm.calls[0]
     assert call.purpose == "gen.teaching" and call.cached_context == corpus.render()
     assert '"he"' in call.system and "Geo" in call.system
     assert "{{term:slug|words}}" in call.system  # survives .format() unescaped for the model to see
+
+
+def test_generate_teaching_retries_when_page_refs_leave_the_part():
+    part, sections, terms = _structure()
+    corpus = _corpus(8)
+    body = "{{term:biosphere|הביוספרה}} " + "y" * 300
+    attempts = []
+
+    def respond(req):
+        attempts.append(req)
+        return _good(body, page_refs=(7,) if len(attempts) == 1 else (1,))
+
+    llm = FakeLLM({TeachingOut: respond})
+    out = generate_teaching(
+        llm, "fake-model", "Geo", "he", corpus, part, sections, terms, {"biosphere": "ביוספרה"}
+    )
+    assert len(attempts) == 2 and out.page_refs == [1]
+
+
+def test_teaching_prompt_separates_printed_numbers_from_page_refs():
+    prompt = load_prompt("teaching").format(subject="Geo", language='"he"')
+    assert "{{term:slug|words}}" in prompt  # survives .format() unescaped
+    assert "page_refs" in prompt and "printed" in prompt

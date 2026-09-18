@@ -14,11 +14,12 @@ class ContentRepository:
 
     def upsert_part(self, content: PartContent) -> None:
         self._conn.execute(
-            "INSERT INTO part_content (part_id, language, title, body, key_points, status, model, error)"
-            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"
+            "INSERT INTO part_content"
+            " (part_id, language, title, body, key_points, status, model, error, page_refs)"
+            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"
             " ON CONFLICT (part_id, language) DO UPDATE SET title = EXCLUDED.title, body = EXCLUDED.body,"
             " key_points = EXCLUDED.key_points, status = EXCLUDED.status, model = EXCLUDED.model,"
-            " error = EXCLUDED.error, updated_at = now()",
+            " error = EXCLUDED.error, page_refs = EXCLUDED.page_refs, updated_at = now()",
             (
                 content.part_id,
                 content.language,
@@ -28,13 +29,14 @@ class ContentRepository:
                 content.status.value,
                 content.model,
                 content.error,
+                list(content.page_refs),
             ),
         )
 
     def part(self, part_id: UUID, language: str) -> PartContent | None:
         row = self._conn.execute(
-            "SELECT part_id, language, title, body, key_points, status, model, error FROM part_content"
-            " WHERE part_id = %s AND language = %s",
+            "SELECT part_id, language, title, body, key_points, status, model, error, page_refs"
+            " FROM part_content WHERE part_id = %s AND language = %s",
             (part_id, language),
         ).fetchone()
         if row is None:
@@ -48,6 +50,7 @@ class ContentRepository:
             status=ContentStatus(row["status"]),
             model=row["model"],
             error=row["error"],
+            page_refs=tuple(row["page_refs"]),
         )
 
     def upsert_sections(self, contents: Sequence[SectionContent]) -> None:

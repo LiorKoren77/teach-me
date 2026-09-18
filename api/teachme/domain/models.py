@@ -177,6 +177,8 @@ class PartContent(Frozen):
     status: ContentStatus
     model: str
     error: str | None = None
+    # Global corpus page indices the body points the student at - what the page-image route takes.
+    page_refs: tuple[int, ...] = ()
 
 
 class SectionContent(Frozen):

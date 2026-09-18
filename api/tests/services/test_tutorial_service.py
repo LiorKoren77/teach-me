@@ -136,6 +136,20 @@ def test_rendered_part_resolves_placeholders_with_source_gloss(container):
     assert "(biosfera)" not in same_language.body
 
 
+def test_rendered_part_carries_the_page_refs_the_teaching_text_points_at(container):
+    subject = _ingested_subject(container)
+    container.tutorial_service.generate(subject)
+    outline = container.outlines.latest(subject.id)
+    part = next(p for p in container.outlines.parts(outline.id) if p.position == 0)
+    # generate -> repository: the stored content keeps the indices the generator returned
+    stored = container.content.part(part.id, "he")
+    assert stored is not None and stored.page_refs == (part.page_start,)
+    # repository -> rendered_part: they reach the client as global corpus indices, which is what
+    # GET /api/subjects/{id}/pages/{global_index}/image takes
+    rendered = container.tutorial_service.rendered_part(subject, "he", part_position=0)
+    assert rendered.page_refs == (part.page_start,)
+
+
 def test_a_failed_part_is_reported_and_leaves_nothing_behind(container):
     subject = _ingested_subject(container)
 

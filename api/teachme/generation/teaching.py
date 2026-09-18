@@ -26,9 +26,19 @@ class TeachingOut(BaseModel):
     body_markdown: str = Field(description="Teaching text with {{term:slug|words}} placeholders")
     key_points: list[str] = Field(min_length=3, max_length=6)
     sections: list[SectionContentOut]
+    page_refs: list[int] = Field(
+        default_factory=list,
+        description=(
+            "Global page indices (the corpus `index` attribute, not the printed number) of the"
+            " pages whose figures, maps or tables the text tells the student to look at. Empty"
+            " when the text points at none."
+        ),
+    )
 
 
-def validate_teaching(out: TeachingOut, sections: Sequence[Section], slugs: set[str]) -> list[str]:
+def validate_teaching(
+    out: TeachingOut, part: Part, sections: Sequence[Section], slugs: set[str]
+) -> list[str]:
     errors: list[str] = []
     if len(out.body_markdown.strip()) < MIN_BODY_CHARS:
         errors.append(f"body_markdown too short ({len(out.body_markdown.strip())} chars)")
@@ -39,6 +49,17 @@ def validate_teaching(out: TeachingOut, sections: Sequence[Section], slugs: set[
     for slug, _ in find_placeholders(out.body_markdown):
         if slug not in slugs:
             errors.append(f"unknown glossary slug {slug!r} in body_markdown")
+    # page_refs address the page-image route, so an index outside the part is a page the student
+    # would be shown by mistake, not a stylistic slip: it fails the attempt and buys the retry.
+    outside = sorted({i for i in out.page_refs if not part.page_start <= i <= part.page_end})
+    if outside:
+        errors.append(
+            f"page_refs {outside} outside the part's page range {part.page_start}-{part.page_end};"
+            " use the global page index of a page this part covers"
+        )
+    duplicates = sorted({i for i in out.page_refs if out.page_refs.count(i) > 1})
+    if duplicates:
+        errors.append(f"page_refs has duplicate entries {duplicates}; list every page at most once")
     return errors
 
 
@@ -85,6 +106,9 @@ def generate_teaching(
         effort="high",
     )
     slugs = {t.slug for t in terms}
-    return generate_validated(
-        llm, request, TeachingOut, validate=lambda out: validate_teaching(out, sections, slugs)
+    out = generate_validated(
+        llm, request, TeachingOut, validate=lambda out: validate_teaching(out, part, sections, slugs)
     ).output
+    # Validation already refused out-of-range and duplicate indices; sorting is only so the stored
+    # order is the reading order of the pages rather than the order the model happened to mention them.
+    return out.model_copy(update={"page_refs": sorted(out.page_refs)})

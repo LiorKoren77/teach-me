@@ -88,6 +88,13 @@ without it every token is treated as a student, since a missing `role` claim fal
 | GET | `/api/admin/subjects/{subject_id}/sources` | admin | List a subject's ingested sources and their status. |
 | GET | `/api/admin/usage` | admin | Model/embedding usage and cost summary, optionally filtered by `subject_id`. |
 
+The `RenderedPart` a `/start` (or a learn route) returns carries `page_refs`: the global page
+indices of the pages whose figures the teaching text points at, written by the generator rather
+than scraped out of the prose. They are exactly the indices `GET /api/subjects/{subject_id}/pages/{global_index}/image`
+takes, so the client can show a page thumbnail next to the text without parsing it; the prose
+itself names pages by their printed number, which is not a corpus index.
+
+
 ### Error statuses
 
 `api/teachme/routes/errors.py` maps domain exceptions to HTTP status codes (most specific class
