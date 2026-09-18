@@ -107,7 +107,9 @@ class PgVectorChunkSearch:
     def lexical(self, subject_id: UUID, tokens: Sequence[str], k: int) -> list[ChunkHit]:
         if not tokens:
             return []
-        query = " | ".join(tokens)
+        query = " | ".join("'" + t.replace("'", "''") + "'" for t in tokens if t)
+        if not query:
+            return []
         rows = self._conn.execute(
             f"SELECT {_HIT_COLUMNS}, ts_rank_cd(tokens, to_tsquery('simple', %(q)s)) AS score"
             " FROM chunks WHERE subject_id = %(sid)s AND tokens @@ to_tsquery('simple', %(q)s)"
