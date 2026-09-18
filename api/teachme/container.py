@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from functools import cached_property
 
@@ -40,11 +40,69 @@ def _secret(value) -> str | None:
     return value.get_secret_value() if value is not None else None
 
 
+# The console ids a federation exchange is made against. The first two are what the exchange
+# itself needs; the other two narrow the token it mints, and the server picks a default without
+# them - so only the first two are required once federation is asked for at all.
+FEDERATION_IDS = (
+    "anthropic_federation_rule_id",
+    "anthropic_organization_id",
+    "anthropic_service_account_id",
+    "anthropic_workspace_id",
+)
+REQUIRED_FEDERATION_IDS = FEDERATION_IDS[:2]
+
+
+def build_identity(settings: Settings) -> Callable[[], str] | None:
+    """What hands the Anthropic SDK this deployment's OIDC token, or None when it authenticates
+    with an API key instead.
+
+    The two halves - the console ids and a provider that can produce a token - are useless apart,
+    and either one alone is a deployment that would fail on its first model call rather than at
+    startup: ids without a provider have nothing to exchange, a provider without ids has nothing
+    to exchange against. Both are refused here, by name."""
+    configured = [name for name in FEDERATION_IDS if getattr(settings, name)]
+    if settings.identity_provider == "none":
+        if configured:
+            raise ConfigurationError(
+                f"{', '.join(name.upper() for name in configured)} set with IDENTITY_PROVIDER=none:"
+                " nothing would mint the OIDC token they are exchanged for. Set"
+                " IDENTITY_PROVIDER=vercel_oidc (on Vercel) or file (with IDENTITY_TOKEN_FILE),"
+                " or unset the federation ids and use ANTHROPIC_API_KEY."
+            )
+        return None
+    missing = [name.upper() for name in REQUIRED_FEDERATION_IDS if not getattr(settings, name)]
+    if missing:
+        raise ConfigurationError(
+            f"IDENTITY_PROVIDER={settings.identity_provider} requires {', '.join(missing)}:"
+            " an OIDC token is exchanged against a federation rule, not presented on its own."
+        )
+    if settings.identity_provider == "file":
+        if not settings.identity_token_file:
+            raise ConfigurationError("IDENTITY_PROVIDER=file requires IDENTITY_TOKEN_FILE")
+        from teachme.adapters.identity.aws import FileIdentity
+
+        return FileIdentity(settings.identity_token_file)
+    from teachme.adapters.identity.vercel_oidc import VercelOidcIdentity
+
+    return VercelOidcIdentity()
+
+
 def build_llm(settings: Settings) -> LLMProvider:
     if settings.llm_provider == "anthropic":
-        from teachme.adapters.llm.anthropic import AnthropicLLM
+        from teachme.adapters.llm.anthropic import AnthropicLLM, workload_identity
 
-        return AnthropicLLM(api_key=_secret(settings.anthropic_api_key))
+        identity = build_identity(settings)
+        if identity is None:
+            return AnthropicLLM(api_key=_secret(settings.anthropic_api_key))
+        return AnthropicLLM(
+            credentials=workload_identity(
+                identity=identity,
+                federation_rule_id=settings.anthropic_federation_rule_id,
+                organization_id=settings.anthropic_organization_id,
+                service_account_id=settings.anthropic_service_account_id,
+                workspace_id=settings.anthropic_workspace_id,
+            )
+        )
     return FakeLLM(
         {**ingestion_responders(), **generation_responders(), **grading_responders()},
         text_responder=default_text_responder(),
@@ -199,7 +257,10 @@ class Container:
                 f"chunks table expects {expected}"
             )
         # Touch every adapter so a missing/invalid configuration surfaces here, at startup,
-        # rather than on the first request that happens to need it.
+        # rather than on the first request that happens to need it. Identity is checked even on
+        # the fake stack: half a federation is a deployment that cannot authenticate, whichever
+        # provider it would have used it for.
+        build_identity(self.settings)
         _ = (self.files, self.scope.job_runner, self.llm, self.reranker)
         self.conn.rollback()
 

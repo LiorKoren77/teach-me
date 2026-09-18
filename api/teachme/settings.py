@@ -90,6 +90,21 @@ class Settings(BaseSettings):
 
     # Credentials, passed explicitly to adapters instead of adapters reading os.environ themselves.
     anthropic_api_key: SecretStr | None = None
+    # Workload identity federation (spec section 9): instead of a long-lived key, the deployment
+    # presents an OIDC token it is handed per invocation and the SDK exchanges it for a short-lived
+    # access token against this rule. All four come from the Anthropic console; the rule and the
+    # organization are what the exchange needs, the service account and workspace narrow what the
+    # minted token may do. Set together with IDENTITY_PROVIDER, or not at all.
+    anthropic_federation_rule_id: str | None = None
+    anthropic_organization_id: str | None = None
+    anthropic_service_account_id: str | None = None
+    anthropic_workspace_id: str | None = None
+    # Where that OIDC token comes from. `vercel_oidc` reads the x-vercel-oidc-token header of the
+    # request being served, so it only works inside a request; `file` re-reads a file on every
+    # exchange (a projected service-account token, and what a CLI or worker run uses); `none`
+    # means this deployment authenticates with ANTHROPIC_API_KEY.
+    identity_provider: Literal["none", "vercel_oidc", "file"] = "none"
+    identity_token_file: Path | None = None
     voyage_api_key: SecretStr | None = None
     blob_read_write_token: SecretStr | None = None
 

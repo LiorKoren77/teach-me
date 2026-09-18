@@ -10,6 +10,7 @@ from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from teachme.adapters.db.migrate import ensure_schema_current
+from teachme.adapters.identity.vercel_oidc import CarryVercelOidcToken
 from teachme.auth.clerk import make_clerk_guard
 from teachme.container import Container
 from teachme.routes import admin, admin_sources, jobs, learning, pages, subjects
@@ -79,6 +80,10 @@ def create_app(container: Container | None = None) -> FastAPI:
     app.state.container = container or Container()
     app.state.clerk_guard = make_clerk_guard(app.state.container.settings.clerk_jwks_url)
     app.add_middleware(RefuseOversizedUploads, limit=app.state.container.settings.max_upload_bytes)
+    # Installed whatever IDENTITY_PROVIDER says: the header costs nothing to carry, and a
+    # deployment switched to federation by an environment variable alone then needs no code
+    # change. Only VercelOidcIdentity ever reads what it puts there.
+    app.add_middleware(CarryVercelOidcToken)
     install_error_handlers(app)
 
     @app.get("/api/health")

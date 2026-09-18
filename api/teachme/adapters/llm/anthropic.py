@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import base64
+from collections.abc import Callable
 from typing import Any
 
-from anthropic import Anthropic
+from anthropic import Anthropic, WorkloadIdentityCredentials
 
 from teachme.ports.llm import (
     ContentPart,
@@ -40,9 +41,23 @@ class AnthropicLLM:
     name = "anthropic"
     MEDIA_TYPES = MEDIA_TYPES
 
-    def __init__(self, client: Anthropic | None = None, api_key: str | None = None) -> None:
-        # api_key None lets the SDK resolve ANTHROPIC_API_KEY or federation from the environment.
-        self._client = client or Anthropic(api_key=api_key, max_retries=5, timeout=600.0)
+    def __init__(
+        self,
+        client: Anthropic | None = None,
+        api_key: str | None = None,
+        credentials: WorkloadIdentityCredentials | None = None,
+    ) -> None:
+        """One of the two credentials, never both: `credentials` is a federation provider that
+        mints a short-lived access token per exchange, `api_key` a long-lived key. Passing a key
+        alongside a provider makes the SDK warn that the static credential shadows it, so the
+        provider is passed on its own. api_key None with no provider lets the SDK resolve
+        ANTHROPIC_API_KEY from the environment, which is what a local run does."""
+        if client is not None:
+            self._client = client
+        elif credentials is not None:
+            self._client = Anthropic(credentials=credentials, max_retries=5, timeout=600.0)
+        else:
+            self._client = Anthropic(api_key=api_key, max_retries=5, timeout=600.0)
 
     def capabilities(self) -> LLMCapabilities:
         return LLMCapabilities(media_types=MEDIA_TYPES)
@@ -109,6 +124,27 @@ class AnthropicLLM:
             model=message.model,
             truncated=message.stop_reason == "max_tokens",
         )
+
+
+def workload_identity(
+    *,
+    identity: Callable[[], str],
+    federation_rule_id: str,
+    organization_id: str,
+    service_account_id: str | None = None,
+    workspace_id: str | None = None,
+) -> WorkloadIdentityCredentials:
+    """The SDK credentials object for workload identity federation, built here because this is
+    the only module allowed to name the vendor SDK. `identity` is called for a fresh OIDC
+    assertion whenever the access token it was exchanged for has expired; the client wraps this
+    provider in its own cache, so that is not once per request."""
+    return WorkloadIdentityCredentials(
+        identity_token_provider=identity,
+        federation_rule_id=federation_rule_id,
+        organization_id=organization_id,
+        service_account_id=service_account_id,
+        workspace_id=workspace_id,
+    )
 
 
 def _thinking(request: StructuredRequest | TextRequest) -> dict[str, str]:

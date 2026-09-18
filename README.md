@@ -434,5 +434,43 @@ versus the local run described above.
   the first deploy, then `vercel` (preview) and `vercel --prod`; ingest, generate and publish one
   real short PDF from the CLI and sign in to run one part end to end before trusting it with
   students. Run `teachme usage` afterwards to see what that run cost.
-- Federation (design spec section 9) and the admin upload pane (stage 5) are deliberately out of
-  scope for this deployment - see Task 11 and "Self-review against the spec" in the plan.
+- The admin upload pane (stage 5) is deliberately out of scope for this deployment - see Task 11
+  and "Self-review against the spec" in the plan.
+
+### Workload identity federation
+
+Production can authenticate to Anthropic with the OIDC token Vercel signs for each invocation
+instead of a long-lived API key: the SDK exchanges that token for a short-lived access token, so
+there is no key to leak or rotate. `CarryVercelOidcToken` (in `api/teachme/app.py`) copies the
+`x-vercel-oidc-token` header of the request being served into a context variable, and
+`VercelOidcIdentity` hands it to the SDK whenever a new access token has to be minted. It works
+only inside a request: a CLI run, the SQS worker or any other process authenticates with
+`IDENTITY_PROVIDER=file` (a file re-read on every exchange) or with an API key.
+
+The steps below are **operator steps** - console and `vercel env` work, not code. Do them in
+order; the key is deleted last, once a federated request has actually succeeded.
+
+1. In the Anthropic console, register the Vercel team issuer `https://oidc.vercel.com/<team>` as
+   a **custom OIDC issuer**, with discovery (the console fetches the JWKS from the issuer's
+   `/.well-known/openid-configuration`).
+2. Raise that issuer's **maximum token lifetime to 2 hours**: Vercel's tokens are valid for
+   longer than the default, and an issuer whose limit is below the token's rejects every
+   exchange.
+3. Create a **federation rule** on the issuer matching the claims `project_id` (this project's
+   id) and `environment` = `production`, with scope `workspace:inference`, targeting the service
+   account that production should act as. Claims that are not matched are not checked, so both
+   are needed: without `environment` a preview deployment would mint production tokens.
+4. Verify a real Vercel token carries **no `jti` claim** (decode one from a deployment, e.g. the
+   header on a request in the function logs). The exchange rejects an assertion the issuer
+   replay-protects with a `jti` it does not recognise, and this is the cheapest way to find that
+   out before switching production over.
+5. Set the environment variables in Vercel (production only): `IDENTITY_PROVIDER=vercel_oidc`,
+   `ANTHROPIC_FEDERATION_RULE_ID`, `ANTHROPIC_ORGANIZATION_ID` (a raw UUID),
+   `ANTHROPIC_SERVICE_ACCOUNT_ID`, `ANTHROPIC_WORKSPACE_ID`. Redeploy, then run one real model
+   call through the app (ingest a short PDF) and confirm it succeeds.
+6. **Delete the production API key** in the console and remove `ANTHROPIC_API_KEY` from the
+   production environment. Until then both credentials exist and the key is what would be used if
+   federation were misconfigured, which is exactly what step 5 is meant to rule out.
+
+The container refuses to start when only half of this is configured - federation ids without an
+`IDENTITY_PROVIDER`, or a provider without the ids - rather than failing on the first model call.
