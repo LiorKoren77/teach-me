@@ -89,13 +89,44 @@ def test_sample_round_spreads_across_sections_and_never_repeats():
 
 
 def test_sample_round_weights_weak_sections_but_keeps_coverage():
+    """Aggregate over many seeds instead of one lucky seed: a 3x weight has to show up as a
+    materially larger share of the round, while every section still gets its coverage question."""
     sections = [uuid4(), uuid4(), uuid4()]
-    bank = _questions(sections, per_section=10)
+    bank = _questions(sections, per_section=10, mc_every=100)
     weights = {sections[0]: 3.0, sections[1]: 1.0, sections[2]: 1.0}
-    rng = random.Random(7)
-    picked = sample_round(bank, asked=set(), per_round=6, weights=weights, rng=rng)
-    counts = {s: sum(1 for q in picked if q.section_id == s) for s in sections}
-    assert counts[sections[0]] >= 3 and all(c >= 1 for c in counts.values())
+    counts = dict.fromkeys(sections, 0)
+    for seed in range(200):
+        picked = sample_round(bank, asked=set(), per_round=6, weights=weights, rng=random.Random(seed))
+        assert len(picked) == 6
+        for section in sections:
+            drawn = sum(1 for q in picked if q.section_id == section)
+            assert drawn >= 1  # coverage survives the weighting
+            counts[section] += drawn
+    assert counts[sections[0]] >= 1.5 * max(counts[sections[1]], counts[sections[2]])
+
+
+def test_sample_round_still_reaches_the_weak_section_when_sections_outnumber_the_round():
+    """With more sections than questions the coverage pass alone decides the round, so it has to
+    run in weight order: otherwise a weak section is simply shuffled out of reach."""
+    sections = [uuid4() for _ in range(8)]
+    bank = _questions(sections, per_section=3)
+    weak = sections[0]
+    rounds = [
+        sample_round(bank, asked=set(), per_round=4, weights={weak: 5.0}, rng=random.Random(seed))
+        for seed in range(200)
+    ]
+    hit = sum(1 for picked in rounds if any(q.section_id == weak for q in picked))
+    assert hit >= 190  # the weak section is in at least 95% of rounds
+
+
+def test_sample_round_keeps_the_banks_question_mix():
+    sections = [uuid4(), uuid4()]
+    bank = _questions(sections, per_section=6, mc_every=2)
+    assert sum(1 for q in bank if q.kind == QuestionKind.MULTIPLE_CHOICE) == len(bank) // 2
+    for seed in range(50):
+        picked = sample_round(bank, asked=set(), per_round=6, weights={}, rng=random.Random(seed))
+        assert len(picked) == 6
+        assert sum(1 for q in picked if q.kind == QuestionKind.MULTIPLE_CHOICE) == 3
 
 
 def test_sample_round_runs_out_gracefully():
