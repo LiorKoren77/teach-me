@@ -700,6 +700,12 @@ class LearningService:
             raise LearningError("published outline missing")
         return outline
 
+    def corpus_for(self, subject: Subject) -> SubjectCorpus:
+        """The subject's pages, for a caller that needs to resolve a page reference the teaching
+        text made. Published-only, like every other student-facing read."""
+        self._require_published(subject)
+        return self._corpus(subject)
+
     def _corpus(self, subject: Subject) -> SubjectCorpus:
         return self._deps.corpus_cache.corpus(subject, lambda: self._deps.tutorial.corpus(subject))
 

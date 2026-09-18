@@ -30,6 +30,7 @@ from teachme.services.learning import LearningDeps, LearningService
 from teachme.services.progress import ProgressService
 from teachme.services.sources import SourceService
 from teachme.services.subjects import SubjectService
+from teachme.services.thumbnails import ThumbnailService
 from teachme.services.tutorial import TutorialService
 from teachme.services.usage import UsageService
 
@@ -196,6 +197,10 @@ class Scope:
             lambda subject, version: self.progress_service.reset_for_new_version(subject, version)
         )
         return service
+
+    @cached_property
+    def thumbnail_service(self) -> ThumbnailService:
+        return ThumbnailService(self.shared.files, self.sources)
 
     @cached_property
     def learning_service(self) -> LearningService:
