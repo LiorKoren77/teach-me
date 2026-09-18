@@ -82,3 +82,4 @@ def test_generate_teaching_uses_cached_corpus_and_language():
     call = llm.calls[0]
     assert call.purpose == "gen.teaching" and call.cached_context == corpus.render()
     assert '"he"' in call.system and "Geo" in call.system
+    assert "{{term:slug|words}}" in call.system  # survives .format() unescaped for the model to see

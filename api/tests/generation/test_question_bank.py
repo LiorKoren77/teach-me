@@ -140,3 +140,4 @@ def test_generate_question_bank_request_shape():
         and "SECTION 1:" in call.parts[0].text
     )
     assert "{count}" not in call.system and "5 questions" in call.system
+    assert "{{term:slug|words}}" in call.system  # survives .format() unescaped for the model to see

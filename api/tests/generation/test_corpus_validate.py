@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+import string
 from uuid import uuid4
 
 import pytest
@@ -31,6 +33,26 @@ def _source(name, n):
 def test_prompts_exist():
     for name in ("outline", "outline_merge", "glossary", "glossary_translate", "teaching", "questions"):
         assert len(load_prompt(name)) > 100
+
+
+def test_prompt_placeholders_survive_formatting():
+    """Every prompt is passed through str.format(); any brace that isn't one of the known
+    named fields must be doubled so it survives as a literal single brace (e.g. the glossary
+    placeholder syntax {{term:slug|words}} shown to the model)."""
+    allowed_fields = {"subject", "language", "count"}
+    dummy = {"subject": "Subj", "language": '"he"', "count": 5}
+    for name in ("outline", "outline_merge", "glossary", "glossary_translate", "teaching", "questions"):
+        text = load_prompt(name)
+        fields = {
+            field_name for _, field_name, _, _ in string.Formatter().parse(text) if field_name is not None
+        }
+        assert fields <= allowed_fields, f"{name}.md: unexpected format field(s) {fields - allowed_fields}"
+        rendered = text.format(**dummy)
+        # A single, un-doubled "{term" (not part of a literal "{{term") means .format() collapsed
+        # the placeholder's escaped braces down to one.
+        assert re.search(r"(?<!\{)\{term", rendered) is None, (
+            f"{name}.md: placeholder collapsed to a single brace after format()"
+        )
 
 
 def test_corpus_renders_sources_in_order_with_global_page_indices():
