@@ -4,13 +4,15 @@ import json
 from collections.abc import Mapping, Sequence
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
-from teachme.domain.models import GlossaryTerm, Outline, Part, PartContent, Question, Section
+from teachme.domain.models import GlossaryTerm, Outline, Part, PartContent, Question, QuestionKind, Section
 from teachme.ports.file_store import FileStore
 
 
 class SectionDoc(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     position: int
     title: str
     page_start: int
@@ -18,6 +20,8 @@ class SectionDoc(BaseModel):
 
 
 class PartDoc(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     position: int
     title: str
     page_start: int
@@ -26,16 +30,29 @@ class PartDoc(BaseModel):
 
 
 class OutlineDoc(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     version: int
     model: str
     parts: list[PartDoc]
 
 
+class GlossaryTermRow(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    slug: str
+    term: str
+    definition: str
+    pages: tuple[int, ...]
+
+
 class QuestionRow(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     part_position: int
     section_position: int
     position: int
-    kind: str
+    kind: QuestionKind
     prompt: str
     expected_answer: str
     rubric: list[str]
@@ -76,7 +93,11 @@ class SubjectBundleWriter:
         self._write("outline.json", doc.model_dump_json(indent=2).encode(), "application/json")
 
     def write_glossary(self, terms: Sequence[GlossaryTerm]) -> None:
-        payload = json.dumps([t.model_dump(mode="json") for t in terms], ensure_ascii=False, indent=2)
+        rows = [
+            GlossaryTermRow(slug=t.slug, term=t.source_term, definition=t.definition, pages=tuple(t.pages))
+            for t in terms
+        ]
+        payload = json.dumps([r.model_dump(mode="json") for r in rows], ensure_ascii=False, indent=2)
         self._write("glossary.json", payload.encode(), "application/json")
 
     def write_translations(self, language: str, translations: Mapping[str, str]) -> None:
@@ -84,29 +105,45 @@ class SubjectBundleWriter:
         self._write(f"glossary.{language}.json", payload.encode(), "application/json")
 
     def write_part_content(self, part: Part, content: PartContent) -> None:
-        points = "\n".join(f"- {p}" for p in content.key_points)
-        body = f"# {content.title}\n\n{content.body.strip()}\n\n## Key points\n\n{points}\n"
-        self._write(f"parts/{part.position + 1:02d}.{content.language}.md", body.encode(), "text/markdown")
+        if content.part_id != part.id:
+            raise ValueError(
+                f"content.part_id {content.part_id} does not match part {part.id} (position {part.position})"
+            )
+        header = (
+            f"<!-- teach-me part position={part.position} language={content.language}"
+            f" model={content.model} status={content.status.value} -->"
+        )
+        body = f"# {content.title}\n\n{content.body.strip()}\n"
+        if content.key_points:
+            points = "\n".join(f"- {p}" for p in content.key_points)
+            body += f"\n## Key points\n\n{points}\n"
+        relative = f"parts/{part.position + 1:02d}.{content.language}.md"
+        self._write(relative, f"{header}\n\n{body}".encode(), "text/markdown")
 
     def write_questions(
         self, language: str, questions: Sequence[Question], positions: Mapping[UUID, tuple[int, int]]
     ) -> None:
-        rows = [
-            QuestionRow(
-                part_position=positions[q.section_id][0],
-                section_position=positions[q.section_id][1],
-                position=q.position,
-                kind=q.kind.value,
-                prompt=q.prompt,
-                expected_answer=q.expected_answer,
-                rubric=list(q.rubric),
-                key_terms=list(q.key_terms),
-                exact_values=list(q.exact_values),
-                choices=list(q.choices) if q.choices else None,
-                correct_choice=q.correct_choice,
+        rows = []
+        for q in questions:
+            try:
+                part_position, section_position = positions[q.section_id]
+            except KeyError:
+                raise ValueError(f"no part/section position recorded for section {q.section_id}") from None
+            rows.append(
+                QuestionRow(
+                    part_position=part_position,
+                    section_position=section_position,
+                    position=q.position,
+                    kind=q.kind,
+                    prompt=q.prompt,
+                    expected_answer=q.expected_answer,
+                    rubric=list(q.rubric),
+                    key_terms=list(q.key_terms),
+                    exact_values=list(q.exact_values),
+                    choices=list(q.choices) if q.choices else None,
+                    correct_choice=q.correct_choice,
+                )
             )
-            for q in questions
-        ]
         data = "".join(r.model_dump_json() + "\n" for r in rows).encode()
         self._write(f"questions.{language}.jsonl", data, "application/x-ndjson")
 

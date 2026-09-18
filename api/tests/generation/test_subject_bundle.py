@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from uuid import uuid4
 
+import pytest
+
 from teachme.adapters.file_store.memory import InMemoryFileStore
 from teachme.domain.models import (
     ContentStatus,
@@ -78,8 +80,74 @@ def test_writer_lays_out_subject_level_files():
     ]
     doc = OutlineDoc.model_validate_json(store.get("geo-12345678/outline.json"))
     assert doc.version == 2 and doc.parts[0].sections[0].title == "What"
+
     md = store.get("geo-12345678/parts/01.he.md").decode()
-    assert md.startswith("# מבוא\n") and "{{term:biosphere|x}} body" in md and "- a" in md
+    assert md.startswith("<!-- teach-me part position=0 language=he model=fake-model status=ready -->\n\n")
+    assert "# מבוא" in md and "{{term:biosphere|x}} body" in md
+    assert "## Key points" in md and "- a" in md
+
     row = json.loads(store.get("geo-12345678/questions.he.jsonl").decode().splitlines()[0])
     assert row["part_position"] == 0 and row["section_position"] == 0 and row["prompt"] == "q"
+    assert row["kind"] == "free_text"
+
     assert json.loads(store.get("geo-12345678/glossary.he.json")) == {"biosphere": "ביוספרה"}
+    glossary_rows = json.loads(store.get("geo-12345678/glossary.json"))
+    assert glossary_rows == [{"slug": "biosphere", "term": "biosfera", "definition": "d", "pages": [0]}]
+    assert "id" not in glossary_rows[0] and "outline_id" not in glossary_rows[0]
+
+
+def test_write_part_content_omits_key_points_section_when_empty():
+    store = InMemoryFileStore()
+    writer = SubjectBundleWriter([store], "geo-12345678")
+    part = Part(id=uuid4(), outline_id=uuid4(), position=0, title="Intro", page_start=0, page_end=3)
+    writer.write_part_content(
+        part,
+        PartContent(
+            part_id=part.id,
+            language="he",
+            title="מבוא",
+            body="body text",
+            key_points=(),
+            status=ContentStatus.READY,
+            model="fake-model",
+        ),
+    )
+    md = store.get("geo-12345678/parts/01.he.md").decode()
+    assert "## Key points" not in md
+
+
+def test_write_part_content_rejects_mismatched_part_id():
+    store = InMemoryFileStore()
+    writer = SubjectBundleWriter([store], "geo-12345678")
+    part = Part(id=uuid4(), outline_id=uuid4(), position=0, title="Intro", page_start=0, page_end=3)
+    content = PartContent(
+        part_id=uuid4(),  # does not match part.id
+        language="he",
+        title="מבוא",
+        body="body text",
+        key_points=(),
+        status=ContentStatus.READY,
+        model="fake-model",
+    )
+    with pytest.raises(ValueError, match=str(content.part_id)):
+        writer.write_part_content(part, content)
+
+
+def test_write_questions_names_the_missing_section():
+    store = InMemoryFileStore()
+    writer = SubjectBundleWriter([store], "geo-12345678")
+    section_id = uuid4()
+    question = Question(
+        id=uuid4(),
+        section_id=section_id,
+        language="he",
+        kind=QuestionKind.FREE_TEXT,
+        prompt="q",
+        expected_answer="a",
+        rubric=("r",),
+        key_terms=("k",),
+        exact_values=(),
+        position=0,
+    )
+    with pytest.raises(ValueError, match=str(section_id)):
+        writer.write_questions("he", [question], {})
