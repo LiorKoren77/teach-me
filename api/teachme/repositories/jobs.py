@@ -65,11 +65,16 @@ class JobRepository:
             "UPDATE jobs SET result = %s, updated_at = now() WHERE id = %s", (Jsonb(result), job_id)
         )
 
-    def has_done(self, kind: str, payload: dict[str, Any]) -> bool:
-        """Whether this exact job - same kind, same payload - has already run to completion. What
-        a redelivered fan-out asks before enqueuing a unit a previous delivery already finished."""
+    def has_pending_or_done(self, kind: str, payload: dict[str, Any]) -> bool:
+        """Whether this exact job - same kind, same payload - already exists and has not failed.
+        What a redelivered fan-out asks before enqueuing a unit a previous delivery already
+        handed over: `done` means it finished, and `queued`/`running` mean another delivery's
+        enqueue of the identical unit is already on its way or in flight, so enqueuing it again
+        here would just be a duplicate racing it. `failed` is deliberately not included - that
+        unit needs enqueuing again, which is exactly how a fan-out retries the part that failed."""
         row = self._conn.execute(
-            "SELECT 1 AS found FROM jobs WHERE kind = %s AND payload = %s AND status = 'done' LIMIT 1",
+            "SELECT 1 AS found FROM jobs WHERE kind = %s AND payload = %s"
+            " AND status IN ('queued', 'running', 'done') LIMIT 1",
             (kind, Jsonb(payload)),
         ).fetchone()
         return row is not None

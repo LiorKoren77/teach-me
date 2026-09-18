@@ -552,6 +552,53 @@ def test_a_redelivered_generate_subject_job_reuses_the_version_it_created(contai
     assert container.tutorial_service.status(subject).publishable
 
 
+def test_a_redelivered_generate_subject_job_skips_units_still_queued(container):
+    """A redelivery can land before the units the first delivery fanned out have even started -
+    the fan-out only just handed them to the queue, which is exactly what `sqs`/`vercel_function`
+    make possible. Skipping only a `done` unit would enqueue every one of them a second time;
+    `has_pending_or_done` also skips one that is `queued` or `running`, so the redelivery creates
+    nothing new."""
+    subject = _ingested_subject(container, languages=("he",))
+    payload = GenerateSubjectJob(subject_id=subject.id).model_dump(mode="json")
+    job_id = container.jobs.create(GENERATE_SUBJECT, payload)
+    container.conn.commit()
+
+    class QueueingRunner:
+        """Records a job row, like `sqs`/`vercel_function` do, without running it - what leaves
+        the fanned-out units `queued` for a redelivery to find rather than `done`."""
+
+        name = "queueing"
+
+        def __init__(self, jobs):
+            self._jobs = jobs
+
+        def enqueue(self, kind, payload):
+            return self._jobs.create(kind, payload)
+
+    runner = QueueingRunner(container.jobs)
+    kwargs = dict(
+        service=container.tutorial_service,
+        subjects=container.subjects,
+        runner=runner,
+        jobs=container.jobs,
+        commit=container.conn.commit,
+    )
+    run_generate_subject(payload, job_id, **kwargs)
+
+    outline = container.outlines.latest(subject.id)
+    expected_units = len(container.outlines.parts(outline.id))
+    rows_before = container.conn.execute(
+        "SELECT id, status FROM jobs WHERE kind = %s", (GENERATE_UNIT,)
+    ).fetchall()
+    assert len(rows_before) == expected_units
+    assert all(r["status"] == "queued" for r in rows_before)
+
+    run_generate_subject(payload, job_id, **kwargs)  # redelivered while every unit is still queued
+
+    rows_after = container.conn.execute("SELECT id FROM jobs WHERE kind = %s", (GENERATE_UNIT,)).fetchall()
+    assert {r["id"] for r in rows_after} == {r["id"] for r in rows_before}
+
+
 def test_plan_generation_refuses_a_subject_whose_sources_are_not_ready(container):
     """The same readiness check the run itself makes, made while a caller is still listening: a
     planner that says yes only to fail in a job nobody is watching is worse than a refusal."""

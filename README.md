@@ -278,7 +278,13 @@ chunking step and one indexing step; when more remains the endpoint enqueues a f
 rest. So an 8-page source read 3 at a time is 5 invocations, and a 400-page book is ~70 short ones
 rather than one that outlives the function's duration limit. `generate_subject` and
 `generate_unit` are already job-sized. Extraction resumes at the first page it has no row for, so
-a step that never came back costs at most the batch it was reading.
+a step that never came back costs at most the batch it was reading. The same is true of a step
+that came back with an error: a source `FAILED` mid-extraction keeps every read batch that already
+landed - its `page_count` stays null until the last batch does - so a retry of that same job
+(`failed` is claimable, same as `queued`) resumes at the first page with no row and pays only for
+the batch that actually failed, not the source again from page 0. An explicit re-ingest (`POST
+.../reingest`) is the one exception: it means starting over, so it drops the source's pages first
+rather than resuming them.
 
 The job row is claimed in a single statement (`UPDATE ... WHERE status IN ('queued','failed')`),
 which both increments `attempts` and makes the delivery exclusive: a redelivery of a job that is

@@ -70,8 +70,9 @@ def run_generate_subject(
     outline version. The version this run resolved is written to the job row the moment the outline
     unit answers, before a single part is enqueued, so the second delivery skips the outline unit
     entirely and fans out against the version the first one produced. The fan-out itself is
-    idempotent the same way: a part whose identical job has already finished is not enqueued again,
-    so a redelivery re-runs only the parts that never made it."""
+    idempotent the same way: a part whose identical job has already finished, or is already
+    queued or running - an earlier delivery's own enqueue of it, still on its way or in flight -
+    is not enqueued again, so a redelivery re-runs only the parts that never made it."""
     job = GenerateSubjectJob.model_validate(payload)
     subject = subjects.get(job.subject_id)
     languages = list(job.languages) or None
@@ -90,8 +91,10 @@ def run_generate_subject(
     failure: Exception | None = None
     for unit in service.plan_part_units(subject, languages=languages, parts=parts, outline_version=version):
         unit_payload = GenerateUnitJob(unit=unit).model_dump(mode="json")
-        if jobs.has_done(GENERATE_UNIT, unit_payload):
-            continue  # a redelivery: this exact part, against this version, is already generated
+        # A redelivery: this exact part, against this version, is already generated, or another
+        # delivery's enqueue of it is already queued or running - either way, not this one's to repeat.
+        if jobs.has_pending_or_done(GENERATE_UNIT, unit_payload):
+            continue
         try:
             runner.enqueue(GENERATE_UNIT, unit_payload)
         except Exception as exc:

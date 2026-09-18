@@ -37,7 +37,7 @@ def _require_draft(subject: Subject) -> Subject:
 def _refuse_the_twenty_first_upload(scope: ScopeDep, user_id: str) -> None:
     """One admin's own uploads, per hour, counted off the audit trail - the only record of who
     uploaded what (`jobs` rows carry no actor). It bounds what a single account can spend on
-    ingestion by mistake, a dropped folder above all, and is checked before the body is read."""
+    ingestion by mistake, a dropped folder above all, and is checked before the file is stored."""
     limit = scope.shared.settings.max_uploads_per_hour
     made = scope.admin_actions.count_since(user_id=user_id, action=UPLOAD, seconds=3600)
     if made >= limit:
