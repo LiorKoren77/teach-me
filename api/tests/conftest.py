@@ -32,6 +32,8 @@ def migrated_database(test_database_url: str) -> str:
 def db(migrated_database: str):
     conn = connect(migrated_database)
     try:
+        conn.execute("TRUNCATE " + ", ".join(TABLES) + " CASCADE")
+        conn.commit()
         yield conn
     finally:
         conn.rollback()
