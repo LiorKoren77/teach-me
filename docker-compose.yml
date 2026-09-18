@@ -7,6 +7,11 @@ services:
       POSTGRES_DB: teachme
     ports:
       - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U teachme -d teachme"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./docker/initdb:/docker-entrypoint-initdb.d:ro
