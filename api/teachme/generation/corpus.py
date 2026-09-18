@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from uuid import UUID
@@ -33,11 +34,18 @@ class SubjectCorpus(BaseModel):
     def total_pages(self) -> int:
         return len(self.pages)
 
+    def _page_at(self, global_index: int) -> CorpusPage:
+        if not 0 <= global_index < self.total_pages:
+            raise IndexError(
+                f"global page index {global_index} out of range for corpus of {self.total_pages} pages"
+            )
+        return self.pages[global_index]
+
     def page_text(self, global_index: int) -> str:
-        return self.pages[global_index].text
+        return self._page_at(global_index).text
 
     def locate(self, global_index: int) -> tuple[UUID, int]:
-        page = self.pages[global_index]
+        page = self._page_at(global_index)
         return page.source_id, page.page_index
 
     def source_ranges(self) -> list[tuple[UUID, int, int]]:
@@ -60,9 +68,9 @@ class SubjectCorpus(BaseModel):
             if page.source_id != current:
                 if current is not None:
                     out.append("</source>")
-                out.append(f'<source name="{page.source_name}">')
+                out.append(f'<source name="{html.escape(page.source_name, quote=True)}">')
                 current = page.source_id
-            printed = page.printed_number or ""
+            printed = html.escape(page.printed_number, quote=True) if page.printed_number else ""
             out.append(f'<page index="{page.global_index}" printed="{printed}">\n{page.text}\n</page>')
         if current is not None:
             out.append("</source>")
@@ -72,7 +80,7 @@ class SubjectCorpus(BaseModel):
 def build_corpus(sources: Sequence[Source], pages_by_source: Mapping[UUID, Sequence[Page]]) -> SubjectCorpus:
     corpus_pages: list[CorpusPage] = []
     for source in sources:
-        for page in sorted(pages_by_source[source.id], key=lambda p: p.page_index):
+        for page in sorted(pages_by_source.get(source.id, ()), key=lambda p: p.page_index):
             corpus_pages.append(
                 CorpusPage(
                     global_index=len(corpus_pages),

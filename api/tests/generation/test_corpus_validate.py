@@ -84,6 +84,40 @@ def test_corpus_language_is_majority_of_sources():
     assert build_corpus([a, b, c], pages).language == "he"
 
 
+def test_corpus_render_escapes_source_name_and_printed_number():
+    a = _source('a"b&c.pdf', 1)
+    pages = {a.id: [Page(page_index=0, printed_number='3"&4', text="X")]}
+    text = build_corpus([a], pages).render()
+    assert '<source name="a&quot;b&amp;c.pdf">' in text
+    assert 'printed="3&quot;&amp;4"' in text
+    assert 'name="a"b&c.pdf"' not in text
+    assert 'printed="3"&4"' not in text
+
+
+def test_page_text_and_locate_raise_indexerror_out_of_range():
+    a = _source("a.pdf", 2)
+    pages = {
+        a.id: [
+            Page(page_index=0, printed_number=None, text="A0"),
+            Page(page_index=1, printed_number=None, text="A1"),
+        ]
+    }
+    corpus = build_corpus([a], pages)
+    for bad in (-1, 2, 100):
+        with pytest.raises(IndexError):
+            corpus.page_text(bad)
+        with pytest.raises(IndexError):
+            corpus.locate(bad)
+
+
+def test_build_corpus_tolerates_source_missing_from_pages_by_source():
+    a, b = _source("a.pdf", 1), _source("b.pdf", 1)
+    pages = {a.id: [Page(page_index=0, printed_number=None, text="A0")]}
+    corpus = build_corpus([a, b], pages)  # b has no entry in pages
+    assert corpus.total_pages == 1
+    assert corpus.page_text(0) == "A0"
+
+
 class Out(BaseModel):
     n: int
 
