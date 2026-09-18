@@ -41,6 +41,9 @@ def test_generate_glossary_uses_cached_corpus():
     out = generate_glossary(llm, "fake-model", "Geo", corpus)
     assert out.terms[0].slug == "t"
     assert llm.calls[0].purpose == "gen.glossary" and llm.calls[0].cached_context == corpus.render()
+    # Same effort as every other call sharing this cached corpus prefix (outline/teaching/questions),
+    # so the cached prefix is never invalidated by a differing effort level.
+    assert llm.calls[0].effort == "high"
 
 
 def test_translate_glossary_validates_full_coverage():

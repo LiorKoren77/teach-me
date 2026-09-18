@@ -73,7 +73,11 @@ def generate_glossary(llm: LLMProvider, model: str, subject_name: str, corpus: S
         parts=(ContentPart.of_text(f"Extract the key terminology from all {corpus.total_pages} pages."),),
         cached_context=corpus.render(),
         max_tokens=GLOSSARY_MAX_TOKENS,
-        effort="medium",
+        # Every call that shares the cached corpus prefix (outline, glossary, teaching, questions)
+        # must use the same effort level; providers key their prompt cache on the full request
+        # including effort, so a differing value here would silently miss the cache and re-pay for
+        # the whole corpus. translate_glossary has no cached context, so it is free to use "low".
+        effort="high",
     )
     return generate_validated(
         llm, request, GlossaryOut, validate=lambda out: validate_glossary(out, corpus.total_pages)
