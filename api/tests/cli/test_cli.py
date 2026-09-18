@@ -71,3 +71,20 @@ def test_ingest_rejects_unknown_type(cli):
     bad.write_bytes(b"PK")
     result = runner.invoke(app, ["ingest", "--subject", "Geo", "--yes", str(bad)])
     assert result.exit_code == 1 and "not accepted" in result.output
+
+
+def test_ingest_survives_a_corrupt_pdf(cli):
+    app, pdf, tmp_path = cli
+    good = tmp_path / "good.pdf"
+    good.write_bytes(make_pdf(2))
+    bad = tmp_path / "bad.pdf"
+    bad.write_bytes(b"not a pdf")
+
+    result = runner.invoke(app, ["ingest", "--subject", "Geo", "--yes", str(good), str(bad)])
+
+    assert result.exit_code == 1
+    assert "good.pdf: ready" in result.output
+    assert "bad.pdf: FAILED" in result.output
+
+    result = runner.invoke(app, ["source", "list", "--subject", "Geo"])
+    assert result.output.count(": ready") == 1

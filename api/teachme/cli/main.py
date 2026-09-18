@@ -9,6 +9,7 @@ import typer
 from teachme.adapters.db.migrate import apply_migrations
 from teachme.container import Container
 from teachme.domain.models import Source
+from teachme.ingestion.errors import ExtractionError
 from teachme.ingestion.estimate import estimate_ingest
 from teachme.ingestion.pdf_pages import page_count
 
@@ -23,6 +24,17 @@ def build_container() -> Container:
     """Patched in tests. One Container per command invocation."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     return Container()
+
+
+def _estimated_pages(path: Path) -> int:
+    """Best-effort page count for the up-front cost estimate. A file that turns out to be
+    unreadable is estimated as 1 page; the per-file loop in `ingest` reports the real failure."""
+    if path.suffix.lower() != ".pdf":
+        return 1
+    try:
+        return page_count(path.read_bytes())
+    except ExtractionError:
+        return 1
 
 
 def _describe(source: Source) -> str:
@@ -78,10 +90,10 @@ def ingest(
     c.check_ready()
     subj = c.subject_service.get_or_create(subject)
 
-    pdf_pages = sum(page_count(path.read_bytes()) for path in files if path.suffix.lower() == ".pdf")
-    other = sum(1 for path in files if path.suffix.lower() != ".pdf")
     estimate = estimate_ingest(
-        page_count=pdf_pages + other, model=c.settings.model_read_pages, prices=c.prices
+        page_count=sum(_estimated_pages(path) for path in files),
+        model=c.settings.model_read_pages,
+        prices=c.prices,
     )
     typer.echo(f"Estimate: {estimate.describe()} (embeddings extra, small)")
     if not yes:
