@@ -83,11 +83,14 @@ def _teaching(request: StructuredRequest) -> BaseModel:
 def _questions(request: StructuredRequest) -> BaseModel:
     text = _user_text(request)
     positions = [int(m.group(1)) for m in _SECTION.finditer(text)]
+    if not positions:
+        raise ValueError("no SECTION lines in the question brief")
     count = int(_COUNT.search(text).group(1))
     slugs = [m.group(1) for m in _TERM.finditer(text)]
     placeholder = f" {{{{term:{slugs[0]}|fake-words}}}}" if slugs else ""
     questions: list[QuestionOut] = []
-    while len(questions) < max(count, 2 * len(positions)):
+    target = max(count, 2 * len(positions))
+    while len(questions) < target:
         for pos in positions:
             questions.append(
                 QuestionOut(
@@ -100,17 +103,20 @@ def _questions(request: StructuredRequest) -> BaseModel:
                     exact_values=[],
                 )
             )
-    questions[-1] = QuestionOut(
-        section_position=positions[0],
-        kind=QuestionKind.MULTIPLE_CHOICE,
-        prompt="Fake choice question?",
-        expected_answer="B",
-        rubric=["fake"],
-        key_terms=[],
-        exact_values=[],
-        choices=["A", "B", "C", "D"],
-        correct_choice=1,
-    )
+    if questions:
+        # Replace question 0, not the last one: it already belongs to positions[0], so
+        # swapping it in for the multiple-choice question leaves every section's count unchanged.
+        questions[0] = QuestionOut(
+            section_position=positions[0],
+            kind=QuestionKind.MULTIPLE_CHOICE,
+            prompt="Fake choice question?",
+            expected_answer="B",
+            rubric=["fake"],
+            key_terms=[],
+            exact_values=[],
+            choices=["A", "B", "C", "D"],
+            correct_choice=1,
+        )
     return QuestionBankOut(questions=questions)
 
 
