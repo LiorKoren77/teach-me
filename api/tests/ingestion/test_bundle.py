@@ -29,6 +29,21 @@ def test_prefixed_store_maps_keys():
     assert not inner.exists("digest/a/b.md")
 
 
+def test_prefixed_store_normalizes_prefix_without_trailing_slash():
+    inner = InMemoryFileStore()
+    store = PrefixedFileStore(inner, "digest")
+    store.put("a/b.md", b"x", "text/markdown")
+    assert inner.get("digest/a/b.md") == b"x"
+    assert store.get("a/b.md") == b"x"
+
+
+def test_prefixed_store_empty_prefix_is_passthrough():
+    inner = InMemoryFileStore()
+    store = PrefixedFileStore(inner, "")
+    store.put("a/b.md", b"x", "text/markdown")
+    assert inner.get("a/b.md") == b"x"
+
+
 def test_writer_writes_every_store_and_reader_round_trips(tmp_path):
     memory = InMemoryFileStore()
     local = LocalFileStore(tmp_path)

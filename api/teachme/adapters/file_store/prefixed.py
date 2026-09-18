@@ -9,7 +9,7 @@ class PrefixedFileStore:
 
     def __init__(self, inner: FileStore, prefix: str) -> None:
         self._inner = inner
-        self._prefix = prefix
+        self._prefix = prefix.rstrip("/") + "/" if prefix else ""
         self.name = f"{inner.name}:{prefix}"
 
     def _key(self, key: str) -> str:
