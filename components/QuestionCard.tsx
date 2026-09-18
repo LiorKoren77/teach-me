@@ -10,24 +10,29 @@ const MAX_ANSWER = 1500;
 // a prompt to reach the DOM as markup. The answer never leaves this component as HTML either.
 export function QuestionCard({ question, busy, strings, onSubmit }: {
   question: QuestionView; busy: boolean; strings: Strings;
-  onSubmit: (answer: { answer_text?: string; answer_choice?: number }) => void;
+  onSubmit: (answer: { answer_text?: string; answer_choice?: number }) => Promise<void>;
 }) {
   const [text, setText] = useState("");
   const [choice, setChoice] = useState<number | null>(null);
   const choices = question.kind === "multiple_choice" ? question.choices : null;
   const ready = choices ? choice !== null : text.trim().length > 0;
 
-  function submit(event: React.FormEvent) {
+  // The answer is only thrown away once the API has it: a submit that fails leaves what the
+  // student wrote where it is, to send again. The failure itself is the caller's to report.
+  async function submit(event: React.FormEvent) {
     event.preventDefault();
     if (busy || !ready) return;
-    if (choices) onSubmit({ answer_choice: choice as number });
-    else onSubmit({ answer_text: text.trim() });
+    try {
+      await onSubmit(choices ? { answer_choice: choice as number } : { answer_text: text.trim() });
+    } catch {
+      return;
+    }
     setText("");
     setChoice(null);
   }
 
   return (
-    <form onSubmit={submit} className="flex flex-col gap-3">
+    <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-3">
       <p className="text-xs text-stone-500">{strings.questionOf(question.position + 1, question.total_in_round)}</p>
       <p className="whitespace-pre-wrap text-base font-medium text-stone-900">{question.prompt}</p>
 

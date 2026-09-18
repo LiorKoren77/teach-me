@@ -9,7 +9,7 @@ import type { Strings } from "@/lib/i18n";
 export function DialogPane({ session, question, lastAnswer, roundResult, busy, streaming, strings, onStartRound, onSubmit, onContinue }: {
   session: PartSession; question: QuestionView | null; lastAnswer: AnswerResult | null;
   roundResult: RoundResultView | null; busy: boolean; streaming: boolean; strings: Strings;
-  onStartRound: () => void; onSubmit: (answer: { answer_text?: string; answer_choice?: number }) => void;
+  onStartRound: () => void; onSubmit: (answer: { answer_text?: string; answer_choice?: number }) => Promise<void>;
   onContinue: () => void;
 }) {
   return (

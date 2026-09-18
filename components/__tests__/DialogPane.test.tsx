@@ -22,7 +22,7 @@ const failedRound: RoundResult = {
   round_no: 1, score: 0.4, passed: false, status: "reinforcing", rounds_left: 2, weak_section_titles: ["Evaporation"],
 };
 
-const shared = { busy: false, streaming: false, strings: t("en"), onStartRound: () => {}, onSubmit: () => {}, onContinue: () => {} };
+const shared = { busy: false, streaming: false, strings: t("en"), onStartRound: () => {}, onSubmit: async () => {}, onContinue: () => {} };
 
 describe("DialogPane", () => {
   it("offers the questions while the student is still reading", () => {

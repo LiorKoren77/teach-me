@@ -6,6 +6,9 @@ import { openSubject } from "@/lib/api/subjects";
 import type { AnswerResult, Language, PartSession, QuestionView, RoundResult, SubjectView } from "@/lib/api/types";
 import { useApiError } from "./useApiError";
 
+/** Already reported by `run`; nothing further to do with it. */
+const ignore = () => {};
+
 /** The part to land on: the first one still to pass, else the last one the student can reach. */
 function landingPosition(view: SubjectView): number {
   const next = view.parts.find((part) => !part.locked && part.status !== "passed");
@@ -59,6 +62,9 @@ export function useLearningSession(subjectId: string, preferred: Language) {
     [getToken],
   );
 
+  // Every action goes through here: it reports the failure and re-throws it, so a caller that
+  // has to know whether the API took it - the answer box, which keeps the student's text when it
+  // did not - can await the result. The ones fired from a button say so with `ignore`.
   const run = useCallback(
     async (work: () => Promise<void>) => {
       setBusy(true);
@@ -67,6 +73,7 @@ export function useLearningSession(subjectId: string, preferred: Language) {
         await work();
       } catch (failure) {
         fail(failure);
+        throw failure;
       } finally {
         setBusy(false);
       }
@@ -100,7 +107,7 @@ export function useLearningSession(subjectId: string, preferred: Language) {
         const view = await openSubject(subjectId, getToken);
         setSubject(view);
         await loadPart(view, position);
-      }),
+      }).catch(ignore),
     [run, subjectId, getToken, loadPart],
   );
 
@@ -108,7 +115,7 @@ export function useLearningSession(subjectId: string, preferred: Language) {
     () =>
       run(async () => {
         if (session?.attempt_id) await openRound(session.attempt_id);
-      }),
+      }).catch(ignore),
     [run, session, openRound],
   );
 
@@ -153,7 +160,7 @@ export function useLearningSession(subjectId: string, preferred: Language) {
         const next = view.parts.find((part) => part.position > here && !part.locked && part.status !== "passed");
         if (next) await loadPart(view, next.position);
         else setRoundResult(null); // Nothing left to unlock; the part stays open to reread.
-      }),
+      }).catch(ignore),
     [run, session, roundResult?.status, subjectId, getToken, loadPart, openRound],
   );
 
