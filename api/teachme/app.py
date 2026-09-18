@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from teachme.adapters.db.migrate import ensure_schema_current
 from teachme.auth.clerk import make_clerk_guard
 from teachme.container import Container
 from teachme.routes import admin, learning, subjects
@@ -19,6 +20,12 @@ def create_app(container: Container | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         try:
+            # A database that is behind the code would break per request, one missing column at a
+            # time; the error is let through so the app fails to start instead of serving. The
+            # check runs on a pooled connection - the same connections the requests will use -
+            # and never on the container's single CLI connection.
+            with app.state.container.pool.connection() as conn:
+                ensure_schema_current(conn)
             yield
         finally:
             if owned:

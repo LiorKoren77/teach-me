@@ -51,7 +51,9 @@ curl localhost:8000/api/health
 ```
 
 `api/index.py` is the file Vercel rewrites every `/api/*` request to, so the local server and the
-deployment serve the same application. `LLM_PROVIDER=fake EMBEDDINGS_PROVIDER=fake
+deployment serve the same application. Startup checks the schema on a pooled connection and
+refuses to serve at all when the database is behind the code (`teachme migrate` has not been run
+against it), rather than failing one request at a time. `LLM_PROVIDER=fake EMBEDDINGS_PROVIDER=fake
 RERANKER_PROVIDER=noop` runs the whole pipeline, including the learning loop, without any API key.
 `docker-compose.yml` maps the container's Postgres to host port 5433 (a native Postgres commonly
 occupies 5432 on the dev machine). Tests:
