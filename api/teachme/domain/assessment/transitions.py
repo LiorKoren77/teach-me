@@ -23,7 +23,13 @@ def assert_transition(current: PartStatus, target: PartStatus) -> None:
 
 
 def after_round(*, score: float, threshold: int, rounds_used: int, max_rounds: int) -> PartStatus:
-    """score in [0,1]; threshold in percent. Pass at or above; otherwise reinforce while rounds remain."""
+    """score in [0,1]; threshold in percent. Pass at or above; otherwise reinforce while rounds remain.
+
+    The range is checked rather than trusted: a percent passed where a fraction belongs would
+    pass every part, and a negative score would stall every one.
+    """
+    if not 0.0 <= score <= 1.0:
+        raise ValueError(f"score must be a fraction in [0, 1], got {score}")
     if score * 100 >= threshold:
         return PartStatus.PASSED
     if rounds_used >= max_rounds:

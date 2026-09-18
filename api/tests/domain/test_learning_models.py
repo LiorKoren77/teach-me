@@ -5,7 +5,14 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from teachme.domain.models import AttemptQuestion, Grade, PartStatus, RelevanceBand, Route
+from teachme.domain.models import (
+    AttemptQuestion,
+    Grade,
+    PartProgress,
+    PartStatus,
+    RelevanceBand,
+    Route,
+)
 
 
 def test_part_status_values_in_spec_order():
@@ -34,3 +41,26 @@ def test_attempt_question_score_points():
     assert AttemptQuestion(**base).points is None  # unanswered
     with pytest.raises(ValidationError):
         AttemptQuestion(**base, relevance_score=1.5)
+
+
+def test_attempt_question_rejects_negative_position_and_round():
+    base = dict(id=uuid4(), attempt_id=uuid4(), question_id=uuid4())
+    assert AttemptQuestion(**base, position=0, round_no=0).round_no == 0
+    with pytest.raises(ValidationError):
+        AttemptQuestion(**base, position=-1)
+    with pytest.raises(ValidationError):
+        AttemptQuestion(**base, position=0, round_no=-1)
+
+
+def test_part_progress_best_score_is_a_fraction():
+    base = dict(id=uuid4(), user_id="u", subject_id=uuid4(), part_id=uuid4(), status=PartStatus.QUIZZING)
+    assert PartProgress(**base, outline_version=1, best_score=0.375).best_score == 0.375
+    assert PartProgress(**base, outline_version=1).best_score is None
+    for bad in (
+        dict(outline_version=-1),
+        dict(outline_version=1, rounds_used=-1),
+        dict(outline_version=1, best_score=60.0),  # a percent is not a fraction
+        dict(outline_version=1, best_score=-0.1),
+    ):
+        with pytest.raises(ValidationError):
+            PartProgress(**base, **bad)

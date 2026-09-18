@@ -6,7 +6,12 @@ from uuid import uuid4
 import pytest
 
 from teachme.domain.assessment.sampling import sample_round
-from teachme.domain.assessment.scoring import round_score, weak_sections
+from teachme.domain.assessment.scoring import (
+    UnmappedQuestion,
+    round_score,
+    section_weights,
+    weak_sections,
+)
 from teachme.domain.assessment.transitions import IllegalTransition, after_round, assert_transition
 from teachme.domain.models import (
     AttemptQuestion,
@@ -51,6 +56,13 @@ def test_after_round():
     assert after_round(score=0.5, threshold=50, rounds_used=1, max_rounds=3) == PartStatus.PASSED
     assert after_round(score=0.2, threshold=50, rounds_used=1, max_rounds=3) == PartStatus.REINFORCING
     assert after_round(score=0.2, threshold=50, rounds_used=3, max_rounds=3) == PartStatus.STALLED
+
+
+def test_after_round_rejects_a_score_outside_the_unit_range():
+    """A percent slipping in where a fraction belongs would silently pass every part."""
+    for bad in (-0.01, 1.5, 60.0):
+        with pytest.raises(ValueError, match="score"):
+            after_round(score=bad, threshold=50, rounds_used=1, max_rounds=3)
 
 
 def _questions(sections, per_section, mc_every=5):
@@ -151,8 +163,49 @@ def test_round_score_and_weak_sections():
     ]
     assert round_score(answered) == pytest.approx(0.375)
     assert round_score([]) == 0.0
-    weak = weak_sections(answered, {q.id: q for q in bank}, cap=3)
-    # section 1 lost 2 points, section 0 lost 0.5 -> only the fully-weak section, then ranked by loss
-    assert weak == [sections[1]]
-    weak_all = weak_sections(answered, {q.id: q for q in bank}, cap=3, min_loss=0.25)
-    assert weak_all == [sections[1], sections[0]]
+    mapping = {q.id: q for q in bank}
+    # section 1 lost 2 points, section 0 lost 0.5: both clear the default min_loss, ranked by loss
+    assert weak_sections(answered, mapping, cap=3) == [sections[1], sections[0]]
+    assert weak_sections(answered, mapping, cap=1) == [sections[1]]
+    assert weak_sections(answered, mapping, cap=3, min_loss=1.0) == [sections[1]]
+
+
+def test_weak_sections_never_empty_for_a_failed_round():
+    """A failed round always has something to reinforce, whatever min_loss the caller asked for:
+    an empty list would leave the student staring at a re-explanation of nothing."""
+    sections = [uuid4(), uuid4()]
+    bank = _questions(sections, per_section=2, mc_every=100)
+    mapping = {q.id: q for q in bank}
+    answered = [
+        _aq(Grade.CORRECT, bank[0]),
+        _aq(Grade.PARTIAL, bank[1]),
+        _aq(Grade.CORRECT, bank[2]),
+        _aq(Grade.CORRECT, bank[3]),
+    ]
+    assert weak_sections(answered, mapping, cap=3, min_loss=2.0) == [sections[0]]
+    # an unanswered question is a whole point lost, not a free pass
+    assert weak_sections([_aq(None, bank[2])], mapping, cap=3) == [sections[1]]
+    # an all-correct round has no weak section at all
+    assert weak_sections([_aq(Grade.CORRECT, q) for q in bank], mapping, cap=3, min_loss=2.0) == []
+
+
+def test_section_weights_are_one_plus_the_points_lost():
+    sections = [uuid4(), uuid4()]
+    bank = _questions(sections, per_section=2, mc_every=100)
+    answered = [
+        _aq(Grade.INCORRECT, bank[0]),
+        _aq(Grade.PARTIAL, bank[1]),
+        _aq(Grade.CORRECT, bank[2]),
+        _aq(Grade.CORRECT, bank[3]),
+    ]
+    weights = section_weights(answered, {q.id: q for q in bank})
+    assert weights[sections[0]] == pytest.approx(2.5)  # 1 + 1.0 + 0.5
+    assert weights[sections[1]] == pytest.approx(1.0)  # all correct: no extra pull
+
+
+def test_scoring_names_the_attempt_question_behind_an_unmapped_question():
+    bank = _questions([uuid4()], per_section=1, mc_every=100)
+    answered = [_aq(Grade.CORRECT, bank[0])]
+    for call in (lambda: weak_sections(answered, {}, cap=1), lambda: section_weights(answered, {})):
+        with pytest.raises(UnmappedQuestion, match=str(answered[0].id)):
+            call()

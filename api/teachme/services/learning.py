@@ -355,9 +355,7 @@ class LearningService:
         answered = self.d.attempts.questions_for_round(attempt.id, attempt.round_no)
         bank = {q.id: q for q in self.d.questions.for_part(attempt.part_id, attempt.language)}
         cap = self.d.settings.reinforce_sections_cap
-        weak_ids = weak_sections(answered, bank, cap=cap) or weak_sections(
-            answered, bank, cap=cap, min_loss=0.5
-        )
+        weak_ids = weak_sections(answered, bank, cap=cap)
         weak = set(weak_ids)
         outline = self._outline(subject)
         part = self.d.outlines.get_part(attempt.part_id)
@@ -488,7 +486,7 @@ class LearningService:
         )
         assert_transition(PartStatus.QUIZZING, status)
         self.d.progress.update(
-            progress.id, status=status, best_score=round(score * 100, 2), rounds_used=rounds_used
+            progress.id, status=status, best_score=round(score, 4), rounds_used=rounds_used
         )
         if status == PartStatus.PASSED:
             self.d.attempts.finish(attempt.id, AttemptStatus.PASSED)
@@ -507,7 +505,7 @@ class LearningService:
     ) -> RoundResult:
         answered = self.d.attempts.questions_for_round(attempt.id, attempt.round_no)
         bank = {q.id: q for q in self.d.questions.for_part(attempt.part_id, attempt.language)}
-        weak = set(weak_sections(answered, bank, cap=self.d.settings.reinforce_sections_cap, min_loss=0.5))
+        weak = set(weak_sections(answered, bank, cap=self.d.settings.reinforce_sections_cap))
         titles = [
             s.title
             for s in self.d.content.sections(attempt.part_id, attempt.language)

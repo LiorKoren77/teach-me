@@ -48,11 +48,11 @@ def test_progress_ensure_get_update_reset(db):
     assert [r.status for r in rows] == [PartStatus.NOT_STARTED, PartStatus.NOT_STARTED]
     again = repo.ensure_for_subject("user_1", subject.id, outline.version, [p1.id, p2.id])
     assert [r.id for r in again] == [r.id for r in rows]  # idempotent
-    repo.update(rows[0].id, status=PartStatus.QUIZZING, best_score=40.0, rounds_used=1)
+    repo.update(rows[0].id, status=PartStatus.QUIZZING, best_score=0.4, rounds_used=1)
     loaded = repo.get("user_1", p1.id)
-    assert loaded.status == PartStatus.QUIZZING and loaded.best_score == 40.0 and loaded.rounds_used == 1
-    repo.update(rows[0].id, best_score=30.0)  # best score never decreases
-    assert repo.get("user_1", p1.id).best_score == 40.0
+    assert loaded.status == PartStatus.QUIZZING and loaded.best_score == 0.4 and loaded.rounds_used == 1
+    repo.update(rows[0].id, best_score=0.3)  # best score never decreases
+    assert repo.get("user_1", p1.id).best_score == 0.4
     assert len(repo.list_for_subject("user_1", subject.id)) == 2
     deleted = repo.reset_subject(subject.id)
     assert deleted == 2 and repo.list_for_subject("user_1", subject.id) == []

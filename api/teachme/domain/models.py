@@ -264,10 +264,10 @@ class PartProgress(Frozen):
     user_id: str
     subject_id: UUID
     part_id: UUID
-    outline_version: int
+    outline_version: int = Field(ge=0)
     status: PartStatus
-    best_score: float | None = None
-    rounds_used: int = 0
+    best_score: float | None = Field(default=None, ge=0, le=1, description="best round score, a fraction")
+    rounds_used: int = Field(default=0, ge=0)
 
 
 class Attempt(Frozen):
@@ -283,8 +283,8 @@ class AttemptQuestion(Frozen):
     id: UUID
     attempt_id: UUID
     question_id: UUID
-    position: int
-    round_no: int = 1
+    position: int = Field(ge=0)
+    round_no: int = Field(default=1, ge=0)
     answer_text: str | None = None
     answer_choice: int | None = None
     relevance_score: float | None = Field(default=None, ge=0.0, le=1.0)
