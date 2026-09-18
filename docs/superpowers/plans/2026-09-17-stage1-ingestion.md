@@ -5533,7 +5533,9 @@ class Container:
             if not self.settings.sqs_queue_url:
                 raise ConfigurationError("JOB_RUNNER=sqs requires SQS_QUEUE_URL")
             return SqsJobRunner(self.settings.sqs_queue_url, self.settings.aws_region, jobs=self.jobs)
-        return InProcessJobRunner({"ingest_source": self._ingest_job}, jobs=self.jobs)
+        return InProcessJobRunner(
+            {"ingest_source": self._ingest_job}, jobs=self.jobs, commit=self.conn.commit, rollback=self.conn.rollback
+        )
 
     @cached_property
     def subject_service(self) -> SubjectService:
