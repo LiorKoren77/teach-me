@@ -38,6 +38,37 @@ not it has been published, instead of the published one. The subject digest bund
 under `digest/<subject slug>/v<outline version>/`: `outline.json`, `glossary.json`,
 `glossary.<lang>.json`, `parts/NN.<lang>.md`, `questions.<lang>.jsonl`.
 
+## Frontend
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22   # the version in .nvmrc
+npm install
+npm run dev                          # with the API on :8000, see "Running the API locally"
+npm run lint && npm run test && npm run build
+```
+
+Environment (in `.env.local`, never committed; placeholders live in `.env.example`):
+
+- `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` - Clerk publishable key. Public by design, but the app
+  will not sign anyone in without it. With no key at all `next build` still succeeds, because
+  the root layout reads the language cookie and every route is therefore rendered on demand.
+- `CLERK_SECRET_KEY` - Clerk secret key, used by the proxy to verify sessions.
+- `BACKEND_URL` - optional; where `next dev` sends `/api/*`, default `http://localhost:8000`.
+  `next.config.ts` adds that rewrite unless `VERCEL` is set, since on Vercel the Python
+  function serves `/api` itself.
+
+The backend needs `CLERK_JWKS_URL` for the same Clerk instance (see "Authentication"); the
+frontend only ever calls relative `/api/...` URLs and attaches the session token as a bearer.
+
+Conventions: components take plain props and never fetch; all fetching lives in `lib/api/*.ts`
+and `hooks/*.ts`; every UI string comes from `lib/i18n.ts` (he, en, pt) and the root layout sets
+`<html lang dir>` from the `teachme_lang` cookie, so Hebrew renders right-to-left. Tests are
+Vitest plus Testing Library (`npm run test`), one Playwright flow (`npm run e2e`).
+
+`proxy.ts` (Next 16's replacement for `middleware.ts`) runs `clerkMiddleware()` and makes an
+optimistic check on `/learn` and `/admin`. Clerk Core 3 deprecated route-matcher protection
+because path matching can diverge from routing, so each protected page also checks for itself.
+
 ## API
 
 ### Running the API locally
