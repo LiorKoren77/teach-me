@@ -11,6 +11,10 @@ from teachme.container import Container
 from teachme.settings import Settings
 
 TABLES = [
+    "reexplanations",
+    "attempt_questions",
+    "attempts",
+    "part_progress",
     "llm_usage",
     "jobs",
     "questions",

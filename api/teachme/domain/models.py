@@ -210,3 +210,103 @@ class Question(Frozen):
         elif self.choices is not None or self.correct_choice is not None:
             raise ValueError("free text questions carry no choices")
         return self
+
+
+class PartStatus(StrEnum):
+    NOT_STARTED = "not_started"
+    LEARNING = "learning"
+    QUIZZING = "quizzing"
+    REINFORCING = "reinforcing"
+    PASSED = "passed"
+    STALLED = "stalled"
+
+
+class AttemptStatus(StrEnum):
+    ACTIVE = "active"
+    PASSED = "passed"
+    FAILED = "failed"
+
+
+class Grade(StrEnum):
+    CORRECT = "correct"
+    PARTIAL = "partial"
+    INCORRECT = "incorrect"
+    OFF_TOPIC = "off_topic"
+    JUNK = "junk"
+
+
+class RelevanceBand(StrEnum):
+    JUNK = "junk"
+    LOW = "low"
+    UNCERTAIN = "uncertain"
+    HIGH = "high"
+
+
+class Route(StrEnum):
+    REJECT_JUNK = "reject_junk"
+    CHECK = "check"  # Haiku relevance check before grading
+    GRADER = "grader"
+    REJECT_OFF_TOPIC = "reject_off_topic"
+    CODE = "code"  # multiple choice graded in code
+
+
+_POINTS = {
+    Grade.CORRECT: 1.0,
+    Grade.PARTIAL: 0.5,
+    Grade.INCORRECT: 0.0,
+    Grade.OFF_TOPIC: 0.0,
+    Grade.JUNK: 0.0,
+}
+
+
+class PartProgress(Frozen):
+    id: UUID
+    user_id: str
+    subject_id: UUID
+    part_id: UUID
+    outline_version: int
+    status: PartStatus
+    best_score: float | None = None
+    rounds_used: int = 0
+
+
+class Attempt(Frozen):
+    id: UUID
+    user_id: str
+    part_id: UUID
+    language: str
+    round_no: int
+    status: AttemptStatus
+
+
+class AttemptQuestion(Frozen):
+    id: UUID
+    attempt_id: UUID
+    question_id: UUID
+    position: int
+    round_no: int = 1
+    answer_text: str | None = None
+    answer_choice: int | None = None
+    relevance_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    relevance_band: RelevanceBand | None = None
+    route: Route | None = None
+    check_verdict: str | None = None
+    grade: Grade | None = None
+    rubric_covered: tuple[int, ...] = ()
+    missed_concepts: tuple[str, ...] = ()
+    feedback: str | None = None
+    rejections: int = 0
+
+    @property
+    def points(self) -> float | None:
+        return None if self.grade is None else _POINTS[self.grade]
+
+
+class Reexplanation(Frozen):
+    id: UUID
+    attempt_id: UUID
+    round_no: int
+    section_ids: tuple[UUID, ...]
+    language: str
+    body: str
+    model: str
