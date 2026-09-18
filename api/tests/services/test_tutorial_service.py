@@ -525,3 +525,26 @@ def test_a_generate_unit_job_refuses_an_outline_unit():
     handler, which resolves that decision once. A job that carried it would create a second."""
     with pytest.raises(ValidationError, match="PART"):
         GenerateUnitJob(unit=GenerationUnit(kind=UnitKind.OUTLINE, subject_id=uuid4()))
+
+
+def test_a_redelivered_generate_subject_job_reuses_the_version_it_created(container):
+    """At-least-once delivery: the same message arrives twice. The first run's decision to create
+    a version is recorded on the job row, so the second delivery reuses it instead of creating a
+    second version, and re-enqueues only the part units that are not already done."""
+    subject = _ingested_subject(container, languages=("he",))
+    payload = GenerateSubjectJob(subject_id=subject.id).model_dump(mode="json")
+    job_id = container.jobs.create(GENERATE_SUBJECT, payload)
+    container.conn.commit()
+
+    handler = container.job_handlers[GENERATE_SUBJECT]
+    handler(payload, job_id)
+    handler(payload, job_id)
+
+    assert [o.version for o in container.outlines.versions(subject.id)] == [1]
+    assert container.jobs.get(job_id)["result"] == {"outline_version": 1}
+
+    rows = container.conn.execute("SELECT payload FROM jobs WHERE kind = %s", (GENERATE_UNIT,)).fetchall()
+    units = [GenerateUnitJob.model_validate(r["payload"]).unit for r in rows]
+    assert units and all(u.outline_version == 1 for u in units)
+    assert len(units) == len({(u.part_position, u.language) for u in units})
+    assert container.tutorial_service.status(subject).publishable

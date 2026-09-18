@@ -92,14 +92,20 @@ class GenerationUnit(BaseModel):
     version.
 
     Idempotence. A PART unit replaces the part's content, its section content and its questions for
-    its language, so running it twice leaves exactly one copy of each and a retry is free. An
-    OUTLINE unit with new_outline=False reuses the current version - it creates one only when the
-    subject has none at all - and rewrites the glossary translations in place, so it is idempotent
-    too. new_outline=True is the one unit that is not, by definition: it is an explicit request for
-    a fresh version, which is what a full `teachme generate` means. A caller that spreads the work
-    over several jobs therefore resolves that flag once, in the `generate_subject` handler, and
-    pins every part unit it enqueues to the version that run produced - so retrying any single job
-    never creates a second version."""
+    its language, so running it twice leaves exactly one copy of each and a retry is free, and it
+    names the version it belongs to rather than asking for the newest one, so a version created in
+    between cannot steal it. An OUTLINE unit with new_outline=False reuses the current version - it
+    creates one only when the subject has none at all - and rewrites the glossary translations in
+    place, so it is idempotent too. new_outline=True is the one unit that is not, by definition: it
+    is an explicit request for a fresh version, which is what a full `teachme generate` means.
+
+    The guarantee, precisely: one `generate_subject` job creates at most one outline version,
+    however many times its message is delivered. Only that handler ever runs an OUTLINE unit -
+    GenerateUnitJob refuses to carry one - and it resolves new_outline exactly once, recording the
+    version it produced on its own job row before enqueuing anything. A redelivery reads that back,
+    runs no outline unit, and re-enqueues only the part units whose own job has not already
+    finished. Every part unit it enqueues is pinned to that version, so no retry, at any level,
+    can produce a second one."""
 
     model_config = ConfigDict(frozen=True)
 

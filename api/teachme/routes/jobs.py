@@ -44,7 +44,7 @@ def _authorize(scope: Scope, given: str | None) -> None:
         raise HTTPException(status_code=401, detail="invalid job secret")
 
 
-def _dispatch(scope: Scope, kind: str, payload: JobPayload) -> UUID | None:
+def _dispatch(scope: Scope, job_id: UUID, kind: str, payload: JobPayload) -> UUID | None:
     """One unit of work. An ingestion advances by exactly one step and hands the remainder to a
     new job, so a 400-page book is many short invocations instead of one that outlives the
     function's duration limit; the generation kinds are already job-sized."""
@@ -55,7 +55,7 @@ def _dispatch(scope: Scope, kind: str, payload: JobPayload) -> UUID | None:
     handler = scope.job_handlers.get(kind)
     if handler is None:
         raise UnknownJobKind(kind)
-    handler(payload)
+    handler(payload, job_id)
     return None
 
 
@@ -71,7 +71,7 @@ def run_job(
     scope.jobs.increment_attempts(job["id"])
     scope.conn.commit()
     try:
-        next_job_id = _dispatch(scope, job["kind"], job["payload"])
+        next_job_id = _dispatch(scope, job["id"], job["kind"], job["payload"])
     except Exception as exc:
         # The step that failed has already rolled its own work back; this puts the connection in a
         # state where the job row can be written, and commits it before the error propagates.

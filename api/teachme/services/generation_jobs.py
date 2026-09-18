@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from uuid import UUID
 
 from pydantic import BaseModel, field_validator
@@ -8,6 +9,7 @@ from pydantic import BaseModel, field_validator
 from teachme.domain.models import ContentStatus
 from teachme.generation.errors import GenerationError
 from teachme.ports.job_runner import JobPayload, JobRunner
+from teachme.repositories.jobs import JobRepository
 from teachme.repositories.subjects import SubjectRepository
 from teachme.services.tutorial import GenerationUnit, TutorialService, UnitKind
 
@@ -44,24 +46,52 @@ class GenerateUnitJob(BaseModel):
         return unit
 
 
+def _decided_version(jobs: JobRepository, job_id: UUID) -> int | None:
+    """The outline version an earlier delivery of this same job already resolved, if any."""
+    version = (jobs.get(job_id).get("result") or {}).get("outline_version")
+    return int(version) if version is not None else None
+
+
 def run_generate_subject(
-    payload: JobPayload, *, service: TutorialService, subjects: SubjectRepository, runner: JobRunner
+    payload: JobPayload,
+    job_id: UUID,
+    *,
+    service: TutorialService,
+    subjects: SubjectRepository,
+    runner: JobRunner,
+    jobs: JobRepository,
+    commit: Callable[[], None],
 ) -> None:
     """Runs the outline and glossary here, then hands each part to a job of its own. Only the
     outline has to happen before anything else; the parts are independent, so they are enqueued
-    rather than run, which is what keeps a single invocation short enough for a function."""
+    rather than run, which is what keeps a single invocation short enough for a function.
+
+    Delivered twice - which an at-least-once queue is allowed to do - it must not generate a second
+    outline version. The version this run resolved is written to the job row the moment the outline
+    unit answers, before a single part is enqueued, so the second delivery skips the outline unit
+    entirely and fans out against the version the first one produced. The fan-out itself is
+    idempotent the same way: a part whose identical job has already finished is not enqueued again,
+    so a redelivery re-runs only the parts that never made it."""
     job = GenerateSubjectJob.model_validate(payload)
     subject = subjects.get(job.subject_id)
     languages = list(job.languages) or None
     parts = list(job.parts) or None
-    plan = service.plan_generation(subject, languages=languages, parts=parts, content_only=job.content_only)
-    outline = service.run_unit(plan[0]).outline
-    assert outline is not None  # an outline unit created or reused a version, or it raised
-    for unit in service.plan_part_units(
-        subject, languages=languages, parts=parts, outline_version=outline.version
-    ):
+    version = _decided_version(jobs, job_id)
+    if version is None:
+        plan = service.plan_generation(
+            subject, languages=languages, parts=parts, content_only=job.content_only
+        )
+        outline = service.run_unit(plan[0]).outline
+        assert outline is not None  # an outline unit created or reused a version, or it raised
+        version = outline.version
+        jobs.set_result(job_id, {"outline_version": version})
+        commit()
+    for unit in service.plan_part_units(subject, languages=languages, parts=parts, outline_version=version):
+        unit_payload = GenerateUnitJob(unit=unit).model_dump(mode="json")
+        if jobs.has_done(GENERATE_UNIT, unit_payload):
+            continue  # a redelivery: this exact part, against this version, is already generated
         try:
-            runner.enqueue(GENERATE_UNIT, GenerateUnitJob(unit=unit).model_dump(mode="json"))
+            runner.enqueue(GENERATE_UNIT, unit_payload)
         except Exception:
             # An in-process runner runs the unit here and re-raises what it failed with; a queued
             # one can fail to accept the message. Either way that unit's own job row carries the

@@ -15,7 +15,7 @@ from teachme.repositories.jobs import JobRepository
 
 def test_inprocess_runs_handler_synchronously_without_repository():
     seen = []
-    runner = InProcessJobRunner({"echo": lambda payload: seen.append(payload)}, jobs=None)
+    runner = InProcessJobRunner({"echo": lambda payload, job_id: seen.append(payload)}, jobs=None)
     job_id = runner.enqueue("echo", {"x": 1})
     assert seen == [{"x": 1}] and job_id
 
@@ -28,10 +28,10 @@ def test_inprocess_unknown_kind():
 def test_inprocess_records_status_and_reraises(db):
     jobs = JobRepository(db)
 
-    def boom(payload):
+    def boom(payload, job_id):
         raise RuntimeError("bad")
 
-    runner = InProcessJobRunner({"ok": lambda p: None, "boom": boom}, jobs=jobs)
+    runner = InProcessJobRunner({"ok": lambda p, j: None, "boom": boom}, jobs=jobs)
     ok_id = runner.enqueue("ok", {})
     assert jobs.get(ok_id)["status"] == "done" and jobs.get(ok_id)["attempts"] == 1
     with pytest.raises(RuntimeError):
@@ -43,7 +43,7 @@ def test_inprocess_records_status_and_reraises(db):
 def test_inprocess_rolls_back_before_recording_failure_then_commits(db):
     jobs = JobRepository(db)
 
-    def boom(payload):
+    def boom(payload, job_id):
         try:
             db.execute("SELECT 1/0")
         except Exception:
@@ -62,7 +62,7 @@ def test_inprocess_rolls_back_before_recording_failure_then_commits(db):
 def test_inprocess_logs_when_recording_failure_raises(db, caplog):
     jobs = JobRepository(db)
 
-    def boom(payload):
+    def boom(payload, job_id):
         raise RuntimeError("bad")
 
     def bad_rollback():

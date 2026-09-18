@@ -5,7 +5,9 @@ from typing import Any, Protocol
 from uuid import UUID
 
 JobPayload = dict[str, Any]
-JobHandler = Callable[[JobPayload], None]
+# The job's own id travels with the payload: a handler that has to survive being delivered twice
+# records what it decided on that row, and reads it back on the second delivery.
+JobHandler = Callable[[JobPayload, UUID], None]
 
 
 class UnknownJobKind(Exception):

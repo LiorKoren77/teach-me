@@ -23,11 +23,29 @@ class JobRepository:
 
     def get(self, job_id: UUID) -> dict[str, Any]:
         row = self._conn.execute(
-            "SELECT id, kind, payload, status, attempts, error FROM jobs WHERE id = %s", (job_id,)
+            "SELECT id, kind, payload, status, attempts, error, result FROM jobs WHERE id = %s",
+            (job_id,),
         ).fetchone()
         if row is None:
             raise JobNotFound(job_id)
         return dict(row)
+
+    def set_result(self, job_id: UUID, result: dict[str, Any]) -> None:
+        """What this job decided, kept for a redelivery of the same message to reuse. Written as
+        soon as the decision is made rather than when the job finishes, so a delivery that dies
+        half way through still hands its successor the same answer."""
+        self._conn.execute(
+            "UPDATE jobs SET result = %s, updated_at = now() WHERE id = %s", (Jsonb(result), job_id)
+        )
+
+    def has_done(self, kind: str, payload: dict[str, Any]) -> bool:
+        """Whether this exact job - same kind, same payload - has already run to completion. What
+        a redelivered fan-out asks before enqueuing a unit a previous delivery already finished."""
+        row = self._conn.execute(
+            "SELECT 1 AS found FROM jobs WHERE kind = %s AND payload = %s AND status = 'done' LIMIT 1",
+            (kind, Jsonb(payload)),
+        ).fetchone()
+        return row is not None
 
     def set_status(self, job_id: UUID, status: str, *, error: str | None = None) -> None:
         self._conn.execute(

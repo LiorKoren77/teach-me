@@ -46,7 +46,7 @@ class InProcessJobRunner:
             if self._commit:
                 self._commit()
         try:
-            handler(payload)
+            handler(payload, job_id)
         except Exception as exc:
             if self._jobs:
                 try:

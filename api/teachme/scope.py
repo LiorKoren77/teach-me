@@ -133,15 +133,21 @@ class Scope:
     def pipeline(self) -> IngestionPipeline:
         return IngestionPipeline(self.pipeline_deps)
 
-    def _ingest_job(self, payload: JobPayload) -> None:
+    def _ingest_job(self, payload: JobPayload, job_id: UUID) -> None:
         self.pipeline.ingest_source(UUID(payload["source_id"]))
 
-    def _generate_subject_job(self, payload: JobPayload) -> None:
+    def _generate_subject_job(self, payload: JobPayload, job_id: UUID) -> None:
         run_generate_subject(
-            payload, service=self.tutorial_service, subjects=self.subjects, runner=self.job_runner
+            payload,
+            job_id,
+            service=self.tutorial_service,
+            subjects=self.subjects,
+            runner=self.job_runner,
+            jobs=self.jobs,
+            commit=self.conn.commit,
         )
 
-    def _generate_unit_job(self, payload: JobPayload) -> None:
+    def _generate_unit_job(self, payload: JobPayload, job_id: UUID) -> None:
         run_generate_unit(payload, service=self.tutorial_service)
 
     @cached_property
