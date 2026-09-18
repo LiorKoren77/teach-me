@@ -6,6 +6,7 @@ from uuid import UUID
 import psycopg
 
 from teachme.domain.models import Question, QuestionKind
+from teachme.repositories.errors import NotFound
 
 _COLUMNS = (
     "id, section_id, language, kind, prompt, expected_answer, rubric, key_terms, exact_values, choices,"
@@ -28,6 +29,10 @@ def _question(row: dict) -> Question:
         correct_choice=row["correct_choice"],
         position=row["position"],
     )
+
+
+class QuestionNotFound(NotFound):
+    entity = "question"
 
 
 class QuestionRepository:
@@ -61,6 +66,12 @@ class QuestionRepository:
                     for q in questions
                 ],
             )
+
+    def get(self, question_id: UUID) -> Question:
+        row = self._conn.execute(f"SELECT {_COLUMNS} FROM questions WHERE id = %s", (question_id,)).fetchone()
+        if row is None:
+            raise QuestionNotFound(question_id)
+        return _question(row)
 
     def for_part(self, part_id: UUID, language: str) -> list[Question]:
         rows = self._conn.execute(

@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     model_detect_language: str = "claude-opus-5"
     model_contextualize: str = "claude-opus-5"
     model_generation: str = "claude-opus-5"
+    model_grader: str = "claude-sonnet-5"
+    model_relevance_check: str = "claude-haiku-4-5"
+    model_reexplain: str = "claude-opus-5"
     embedding_model: str = "voyage-4"
     rerank_model: str = "rerank-2.5"
 
@@ -43,6 +46,10 @@ class Settings(BaseSettings):
     max_pages_per_source: int = 400
     pages_per_read_batch: int = 6
     pages_per_chunk_batch: int = 6
+    max_answer_chars: int = 1500
+    max_answers_per_minute: int = 20
+    max_rejections_per_question: int = 2
+    reinforce_sections_cap: int = 3
 
     # Credentials, passed explicitly to adapters instead of adapters reading os.environ themselves.
     anthropic_api_key: SecretStr | None = None

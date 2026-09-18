@@ -22,18 +22,23 @@ from teachme.ports.file_store import FileStore
 from teachme.ports.job_runner import JobPayload, JobRunner
 from teachme.ports.llm import LLMProvider
 from teachme.ports.reranker import Reranker
+from teachme.repositories.attempts import AttemptRepository
 from teachme.repositories.content import ContentRepository
 from teachme.repositories.figures import FigureRepository
 from teachme.repositories.glossary import GlossaryRepository
 from teachme.repositories.jobs import JobRepository
 from teachme.repositories.outlines import OutlineRepository
 from teachme.repositories.pages import PageRepository
+from teachme.repositories.progress import ProgressRepository
 from teachme.repositories.questions import QuestionRepository
 from teachme.repositories.sources import SourceRepository
 from teachme.repositories.subjects import SubjectRepository
 from teachme.repositories.usage import UsageRepository
 from teachme.retrieval.hybrid import HybridSearch
+from teachme.services.corpus_cache import CorpusCache
 from teachme.services.export_import import ExportImportService
+from teachme.services.learning import LearningDeps, LearningService
+from teachme.services.progress import ProgressService
 from teachme.services.sources import SourceService
 from teachme.services.subjects import SubjectService
 from teachme.services.tutorial import TutorialService
@@ -181,6 +186,14 @@ class Container:
         return QuestionRepository(self.conn)
 
     @cached_property
+    def progress(self) -> ProgressRepository:
+        return ProgressRepository(self.conn)
+
+    @cached_property
+    def attempts(self) -> AttemptRepository:
+        return AttemptRepository(self.conn)
+
+    @cached_property
     def usage_repo(self) -> UsageRepository:
         return UsageRepository(self.usage_conn)
 
@@ -239,8 +252,37 @@ class Container:
         )
 
     @cached_property
+    def corpus_cache(self) -> CorpusCache:
+        return CorpusCache()
+
+    @cached_property
+    def progress_service(self) -> ProgressService:
+        return ProgressService(self.conn, self.outlines, self.progress)
+
+    @cached_property
+    def learning_service(self) -> LearningService:
+        return LearningService(
+            LearningDeps(
+                conn=self.conn,
+                settings=self.settings,
+                llm=self.llm,
+                hybrid=self.hybrid_search,
+                subjects=self.subjects,
+                outlines=self.outlines,
+                glossary=self.glossary,
+                content=self.content,
+                questions=self.questions,
+                progress=self.progress,
+                attempts=self.attempts,
+                tutorial=self.tutorial_service,
+                progress_service=self.progress_service,
+                corpus_cache=self.corpus_cache,
+            )
+        )
+
+    @cached_property
     def tutorial_service(self) -> TutorialService:
-        return TutorialService(
+        service = TutorialService(
             self.conn,
             self.settings,
             self.llm,
@@ -253,6 +295,12 @@ class Container:
             self.questions,
             self.bundle_stores,
         )
+        # A new published version means new part ids: a student's progress against the old ones
+        # is meaningless, so it is dropped the moment the version changes.
+        service.on_version_published(
+            lambda subject, version: self.progress_service.reset_for_new_version(subject, version)
+        )
+        return service
 
     @cached_property
     def usage_service(self) -> UsageService:
