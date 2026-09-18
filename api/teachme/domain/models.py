@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import StrEnum
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class SubjectState(StrEnum):
@@ -42,9 +42,9 @@ class Source(BaseModel):
     filename: str
     media_type: str
     file_key: str
-    size: int
+    size: int = Field(ge=0)
     status: SourceStatus
-    page_count: int | None = None
+    page_count: int | None = Field(default=None, ge=0)
     vision_pages: int | None = None
     detected_language: str | None = None
     error: str | None = None
@@ -75,6 +75,12 @@ class Chunk(Frozen):
     def content(self) -> str:
         """What gets embedded and indexed: the situating context first."""
         return f"{self.context}\n\n{self.text}"
+
+    @model_validator(mode="after")
+    def _page_range_is_ordered(self) -> Chunk:
+        if self.page_end < self.page_start:
+            raise ValueError(f"page_end ({self.page_end}) must not be before page_start ({self.page_start})")
+        return self
 
 
 class ChunkRecord(Frozen):
