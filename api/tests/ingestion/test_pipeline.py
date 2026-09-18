@@ -168,3 +168,46 @@ def test_reingest_clears_previous_chunks_before_extraction(env):
 
     assert pipeline.ingest_source(source.id).status == SourceStatus.READY
     assert deps.search.count(subject.id) == 5
+
+
+def _purpose_counts(fake_llm) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for request in fake_llm.calls:
+        counts[request.purpose] = counts.get(request.purpose, 0) + 1
+    return counts
+
+
+def test_resume_from_indexing_reuses_the_chunks_in_the_bundle(env):
+    deps, subject, source, fake_llm = env
+    pipeline = IngestionPipeline(deps)
+    assert pipeline.ingest_source(source.id).status == SourceStatus.READY
+    before = _purpose_counts(fake_llm)
+
+    deps.sources.set_status(source.id, SourceStatus.FAILED, resume_status=SourceStatus.INDEXING)
+    deps.conn.commit()
+
+    assert pipeline.ingest_source(source.id).status == SourceStatus.READY
+    after = _purpose_counts(fake_llm)
+    assert after["ingest.read_pages"] == before["ingest.read_pages"]
+    assert after["ingest.contextualize"] == before["ingest.contextualize"]
+    assert deps.search.count(subject.id) == 5
+
+
+def test_resume_from_indexing_rebuilds_chunks_when_the_bundle_lost_them(env):
+    deps, subject, source, fake_llm = env
+    pipeline = IngestionPipeline(deps)
+    assert pipeline.ingest_source(source.id).status == SourceStatus.READY
+    before = _purpose_counts(fake_llm)
+
+    deps.sources.set_status(source.id, SourceStatus.FAILED, resume_status=SourceStatus.INDEXING)
+    deps.conn.commit()
+    deps.bundle_stores[0].delete(
+        f"{bundle_slug('Geo', subject.id)}/{bundle_slug('ch1.pdf', source.id)}/chunks.jsonl"
+    )
+
+    assert pipeline.ingest_source(source.id).status == SourceStatus.READY
+    after = _purpose_counts(fake_llm)
+    assert after["ingest.read_pages"] == before["ingest.read_pages"]
+    # one more contextualize pass: three requests for the 2, 2, 1 page batches
+    assert after["ingest.contextualize"] - before["ingest.contextualize"] == 3
+    assert deps.search.count(subject.id) == 5
