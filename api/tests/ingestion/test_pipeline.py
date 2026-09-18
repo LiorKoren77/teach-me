@@ -10,6 +10,7 @@ from teachme.adapters.llm.fake import FakeLLM
 from teachme.domain.models import SourceStatus, SubjectState
 from teachme.ingestion.bundle import BundleReader, bundle_slug
 from teachme.ingestion.contextualize import ChunksOut
+from teachme.ingestion.detect_language import DetectedLanguage
 from teachme.ingestion.errors import SubjectLocked
 from teachme.ingestion.fake_responders import default_responders
 from teachme.ingestion.pipeline import IngestionPipeline, PipelineDeps
@@ -112,6 +113,26 @@ def test_failure_records_resume_point_and_rerun_skips_extraction(env):
     assert result.status == SourceStatus.READY
     read_calls_after = sum(1 for r in fake_llm.calls if r.purpose == "ingest.read_pages")
     assert read_calls_after == read_calls_before  # pages were reused, not re-read
+
+
+def test_extraction_failure_rolls_back_partial_writes_before_marking_failed(env):
+    deps, subject, source, fake_llm = env
+
+    def boom(request):
+        raise RuntimeError("language service down")
+
+    fake_llm._responders[DetectedLanguage] = boom
+    pipeline = IngestionPipeline(deps)
+    with pytest.raises(RuntimeError):
+        pipeline.ingest_source(source.id)
+
+    failed = deps.sources.get(source.id)
+    assert failed.status == SourceStatus.FAILED and failed.resume_status == SourceStatus.EXTRACTING
+    assert deps.pages.list(source.id) == []
+
+    fake_llm._responders[DetectedLanguage] = default_responders()[DetectedLanguage]
+    result = pipeline.ingest_source(source.id)
+    assert result.status == SourceStatus.READY
 
 
 def test_published_subject_is_locked(env):

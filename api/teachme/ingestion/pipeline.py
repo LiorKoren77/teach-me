@@ -77,6 +77,7 @@ class IngestionPipeline:
                     self._index(source, subject, bundle, source_slug, chunks)
             except Exception as exc:
                 log.exception("ingestion of %s failed during %s", source.id, step.value)
+                self.d.conn.rollback()
                 self.d.sources.set_status(
                     source.id, SourceStatus.FAILED, error=f"{type(exc).__name__}: {exc}", resume_status=step
                 )
@@ -97,10 +98,10 @@ class IngestionPipeline:
         self.d.conn.commit()
         data = self.d.files.get(source.file_key)
         extraction = extract(self.d.llm, self.d.settings, data, source.media_type, language_hint=None)
-        language = detect_language(self.d.llm, self.d.settings.model_detect_language, extraction.pages)
 
         self.d.pages.replace(source.id, extraction.pages)
         self.d.figures.replace(source.id, extraction.figures)
+        language = detect_language(self.d.llm, self.d.settings.model_detect_language, extraction.pages)
         self.d.sources.set_extraction_result(
             source.id,
             page_count=len(extraction.pages),
