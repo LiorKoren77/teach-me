@@ -9,6 +9,7 @@ from uuid import UUID
 import psycopg
 
 from teachme.adapters.chunk_search.pgvector import PgVectorChunkSearch
+from teachme.adapters.db.engine import connect
 from teachme.adapters.job_runner.inprocess import InProcessJobRunner
 from teachme.ingestion.pipeline import INGEST_SOURCE, IngestionPipeline, PipelineDeps
 from teachme.ports.job_runner import JobHandler, JobPayload, JobRunner
@@ -162,16 +163,30 @@ class Scope:
 
     def mark_job_failed(self, job_id: UUID, error: str) -> None:
         """Record a job as failed from outside the request that enqueued it. The vercel_function
-        runner calls this from its POST thread, by which time this request's pooled connection may
-        already be serving someone else, so a connection of its own is taken when there is a pool;
-        a CLI container has none and uses its single connection."""
-        pool = self.shared.__dict__.get("pool")
-        if pool is None:
+        runner calls this from its POST thread, by which time this request's pooled connection
+        may already be serving someone else - and under load the pool may have nothing left to
+        give, so asking it for one would wait, time out and lose the failure. A connection of its
+        own, autocommit and short-lived, is the same answer telemetry uses for the same reason.
+        A CLI container has no pool and writes on its single connection."""
+        if not self.shared.has_pool:
             self.jobs.set_status(job_id, "failed", error=error)
             self.conn.commit()
             return
-        with pool.connection() as conn:
+        with connect(self.shared.settings.database_url, autocommit=True) as conn:
             JobRepository(conn).set_status(job_id, "failed", error=error)
+
+    def sweep_stale_jobs(self) -> tuple[list[UUID], list[UUID]]:
+        """Unstick the queue, and say what was unstuck: the jobs whose invocation died mid-step,
+        marked failed so a delivery can claim them again, and the jobs that were handed over but
+        never delivered, posted again here. Both are measured against
+        JOB_STALE_AFTER_SECONDS."""
+        after = self.shared.settings.job_stale_after_seconds
+        failed = self.jobs.fail_stale_running(after)
+        queued = self.jobs.requeue_stale_queued(after)
+        self.conn.commit()
+        for job in queued:
+            self.job_runner.deliver(job.id, job.kind, job.payload)
+        return failed, [job.id for job in queued]
 
     @cached_property
     def job_runner(self) -> JobRunner:

@@ -39,6 +39,13 @@ class SqsJobRunner:
         job_id = self._jobs.create(kind, payload) if self._jobs else uuid4()
         if self._commit:
             self._commit()
+        self.deliver(job_id, kind, payload)
+        return job_id
+
+    # Sending to SQS is already synchronous: the message is accepted before this returns.
+    enqueue_inline = enqueue
+
+    def deliver(self, job_id: UUID, kind: str, payload: JobPayload) -> None:
         body = json.dumps({"job_id": str(job_id), "kind": kind, "payload": payload})
         try:
             self._client.send_message(QueueUrl=self._queue_url, MessageBody=body)
@@ -48,4 +55,3 @@ class SqsJobRunner:
                 if self._commit:
                     self._commit()
             raise
-        return job_id

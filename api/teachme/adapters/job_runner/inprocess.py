@@ -32,8 +32,16 @@ class InProcessJobRunner:
         self._rollback = rollback
 
     def enqueue(self, kind: str, payload: JobPayload) -> UUID:
-        handler = self._handlers.get(kind)
         job_id = self._jobs.create(kind, payload) if self._jobs else uuid4()
+        self.deliver(job_id, kind, payload)
+        return job_id
+
+    # Everything this runner does is already inline; the distinction only matters to a runner
+    # that hands work to another process.
+    enqueue_inline = enqueue
+
+    def deliver(self, job_id: UUID, kind: str, payload: JobPayload) -> None:
+        handler = self._handlers.get(kind)
         if handler is None:
             if self._jobs:
                 self._jobs.set_status(job_id, "failed", error=f"unknown job kind {kind!r}")
@@ -62,4 +70,3 @@ class InProcessJobRunner:
             self._jobs.set_status(job_id, "done")
             if self._commit:
                 self._commit()
-        return job_id

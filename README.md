@@ -28,6 +28,7 @@ teachme generate --subject "History ch. 3"            # outline, glossary, teach
 teachme tutorial status --subject "History ch. 3"
 teachme tutorial show --subject "History ch. 3" --language he --part 0
 teachme publish --subject "History ch. 3"             # locks sources, students can see it
+teachme jobs sweep                                    # unstick jobs no invocation is coming back for
 teachme eval --language en                            # score generation and grading against the fixtures
 ```
 
@@ -223,9 +224,9 @@ selects:
   thread, so `teachme ingest` blocks until the source is ready.
 - `vercel_function` is the serverless answer to having no worker: the request creates the job row,
   commits it, and posts `{job_id, kind, payload}` to `{SELF_BASE_URL}/api/jobs/run` with the
-  `x-job-secret` header from a daemon thread it never waits on (a read timeout means delivered,
-  not failed - the receiving invocation is still working). `SELF_BASE_URL` unset means
-  `https://{VERCEL_URL}`, so a preview deployment calls itself rather than production.
+  `x-job-secret` header (a read timeout means delivered, not failed - the receiving invocation is
+  still working). `SELF_BASE_URL` unset means `https://{VERCEL_URL}`, so a preview deployment
+  calls itself rather than production.
 - `sqs` enqueues the identical message for an AWS worker.
 
 `POST /api/jobs/run` does **one** unit of work per invocation. For `ingest_source` that unit is
@@ -243,6 +244,18 @@ not retried and the work is not repeated. An invocation killed by the duration l
 nothing on its way out, so every delivery first sweeps rows left `running` for longer than
 `JOB_STALE_AFTER_SECONDS` (default 300) and marks them `failed`, which is also what makes them
 claimable again; `teachme jobs sweep` runs the same sweep by hand.
+
+Who waits for that POST depends on who is posting. `/api/jobs/run` hands the next step over
+**inline**, before it answers: Vercel is free to freeze an instance the moment its response goes
+out, and a POST left on a thread would take the rest of the ingestion with it. It costs the
+runner's one-second read timeout, not the step the next invocation runs. An admin route - upload,
+reingest, generate - still posts from a daemon thread it never waits on, so the browser is not
+held while a job starts. **The residual risk is that first hand-over**: if the instance is frozen
+between the response and the POST, the job row stays `queued` and nothing comes for it. That is
+what `requeue_stale_queued` is for - `teachme jobs kick` posts every job queued for longer than
+`JOB_STALE_AFTER_SECONDS` again (and `teachme jobs sweep` does that plus the `running` sweep), so
+a cron or an operator recovers it. The re-post touches `updated_at`, so two sweeps a moment apart
+do not deliver the same job twice.
 
 `vercel.json` sets `maxDuration: 300` on `api/index.py`. **That ceiling depends on the account
 plan** - 300 s needs Pro or above; on Hobby the deploy is rejected or the value is clamped, so

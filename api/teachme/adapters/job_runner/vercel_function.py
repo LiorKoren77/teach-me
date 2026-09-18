@@ -65,11 +65,28 @@ class VercelFunctionJobRunner:
         self._timeout = timeout
 
     def enqueue(self, kind: str, payload: JobPayload) -> UUID:
+        job_id = self._record(kind, payload)
+        body = {"job_id": str(job_id), "kind": kind, "payload": payload}
+        self._spawn(lambda: self._post(job_id, body))
+        return job_id
+
+    def enqueue_inline(self, kind: str, payload: JobPayload) -> UUID:
+        """For a caller that may not exist a moment from now. Vercel is free to freeze an
+        instance as soon as its response goes out, so a POST left on a daemon thread can simply
+        never leave - and the job it was handing over is then a `queued` row nobody delivers.
+        Posting here costs the runner's own one-second read timeout and no more: the receiving
+        invocation does the work, and not answering is the normal case."""
+        job_id = self._record(kind, payload)
+        self.deliver(job_id, kind, payload)
+        return job_id
+
+    def deliver(self, job_id: UUID, kind: str, payload: JobPayload) -> None:
+        self._post(job_id, {"job_id": str(job_id), "kind": kind, "payload": payload})
+
+    def _record(self, kind: str, payload: JobPayload) -> UUID:
         job_id = self._jobs.create(kind, payload) if self._jobs else uuid4()
         if self._commit:
             self._commit()
-        body = {"job_id": str(job_id), "kind": kind, "payload": payload}
-        self._spawn(lambda: self._post(job_id, body))
         return job_id
 
     def _post(self, job_id: UUID, body: dict[str, Any]) -> None:

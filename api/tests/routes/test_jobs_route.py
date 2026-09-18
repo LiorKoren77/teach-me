@@ -21,8 +21,10 @@ class RecordingClient:
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict]] = []
+        self.delay = 0.0  # a test that cares whether the POST was waited for sets this
 
     def post(self, url, **kwargs):
+        time.sleep(self.delay)
         self.calls.append((url, kwargs))
         return httpx.Response(200, request=httpx.Request("POST", url))
 
@@ -179,6 +181,17 @@ def test_each_call_runs_one_step_and_re_enqueues_the_rest(ingest_job):
     assert kwargs["json"]["kind"] == "ingest_source"
     assert kwargs["json"]["payload"] == {"source_id": str(source.id)}
     assert kwargs["headers"] == {"x-job-secret": SECRET}
+
+
+def test_the_next_step_is_handed_over_before_the_response(ingest_job):
+    """Vercel may freeze the instance the moment the response goes out, so a POST still sitting
+    on a daemon thread may never leave it. The re-enqueue from this endpoint goes out inline,
+    bounded by the runner's one-second read timeout - nothing here waits for the work itself."""
+    http, container, source, job_id, client = ingest_job
+    client.delay = 0.3  # a daemon thread would still be inside the POST when the response lands
+    response = run(http, job_id)
+    assert response.json()["status"] == "done"
+    assert len(client.calls) == 1  # already delivered, not left behind on a thread
 
 
 def test_a_delivery_sweeps_jobs_whose_invocation_died(ingest_job):

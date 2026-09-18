@@ -362,18 +362,40 @@ def tutorial_show(
 
 @jobs_app.command("sweep")
 def jobs_sweep() -> None:
-    """Fail jobs left `running` by an invocation that never came back, so they can be retried.
+    """Unstick jobs nothing is going to move on its own, and say what was unstuck.
 
-    The same sweep every delivery of `/api/jobs/run` performs, for a deployment that is not
-    receiving deliveries any more - exactly the state a lost invocation leaves behind.
+    Two ways a job gets stuck: an invocation that hit the function's duration limit leaves its
+    row `running` for ever, and a hand-over that was accepted but never ran leaves a `queued` row
+    nobody is coming back for. The first is marked failed, which is also what makes it claimable
+    again; the second is posted again. `/api/jobs/run` does the first of these on every delivery.
     """
 
     def body(c: Container) -> None:
-        stale = c.jobs.fail_stale_running(c.settings.job_stale_after_seconds)
+        failed, delivered = c.scope.sweep_stale_jobs()
+        for job_id in failed:
+            typer.echo(f"failed: {job_id} (nothing wrote it for {c.settings.job_stale_after_seconds}s)")
+        for job_id in delivered:
+            typer.echo(f"delivered: {job_id}")
+        typer.echo(f"{len(failed)} stale running, {len(delivered)} undelivered")
+
+    _run(body)
+
+
+@jobs_app.command("kick")
+def jobs_kick() -> None:
+    """Post every long-queued job to the runner again.
+
+    For the hand-over that never landed: the row is `queued`, no invocation is coming for it, and
+    nothing else looks at it. Behind the in-process runner this simply runs them here.
+    """
+
+    def body(c: Container) -> None:
+        queued = c.jobs.requeue_stale_queued(c.settings.job_stale_after_seconds)
         c.conn.commit()
-        for job_id in stale:
-            typer.echo(f"failed: {job_id} (no invocation wrote it for {c.settings.job_stale_after_seconds}s)")
-        typer.echo(f"{len(stale)} stale running job(s)")
+        for job in queued:
+            c.job_runner.deliver(job.id, job.kind, job.payload)
+            typer.echo(f"delivered: {job.id} ({job.kind})")
+        typer.echo(f"{len(queued)} undelivered job(s)")
 
     _run(body)
 

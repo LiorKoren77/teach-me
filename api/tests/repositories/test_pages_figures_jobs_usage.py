@@ -77,6 +77,27 @@ def test_jobs_fail_stale_running_leaves_a_fresh_one_alone(db):
     assert repo.fail_stale_running(300) == []  # nothing left to sweep
 
 
+def test_jobs_requeue_stale_queued_returns_only_the_old_queued_rows(db):
+    """A POST that was accepted but whose invocation never ran leaves a `queued` row nobody is
+    coming back for. These are the rows worth posting again - and only these."""
+    repo = JobRepository(db)
+    forgotten = repo.create("ingest_source", {"source_id": "a"})
+    recent = repo.create("ingest_source", {"source_id": "b"})
+    running = repo.create("ingest_source", {"source_id": "c"})
+    repo.set_status(running, "running")
+    db.execute(
+        "UPDATE jobs SET updated_at = now() - interval '20 minutes' WHERE id IN (%s, %s)",
+        (forgotten, running),
+    )
+
+    stale = repo.requeue_stale_queued(300)
+    assert [job.id for job in stale] == [forgotten]
+    assert stale[0].kind == "ingest_source" and stale[0].payload == {"source_id": "a"}
+    assert repo.get(forgotten)["status"] == "queued"  # delivering it is the caller's job
+    assert repo.requeue_stale_queued(300) == []  # its updated_at was touched, so not twice
+    assert repo.get(recent)["status"] == "queued" and repo.get(running)["status"] == "running"
+
+
 def test_usage_insert_and_summarize(db):
     subject, source = _source(db)
     repo = UsageRepository(db)

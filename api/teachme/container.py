@@ -113,6 +113,13 @@ class Container:
         job runner calling this deployment back. One client, so connections are reused."""
         return httpx.Client()
 
+    @property
+    def has_pool(self) -> bool:
+        """Whether this container is serving requests. `pool` is a cached_property, so asking
+        for it would open one; this only reports whether one is already open, which is what
+        tells code written for both the CLI and the request path which of the two it is in."""
+        return "pool" in self.__dict__
+
     @cached_property
     def prices(self) -> PriceTable:
         return PriceTable()
@@ -163,7 +170,7 @@ class Container:
         # now live on a Scope. The guard keeps a half-built container from recursing forever.
         if name.startswith("_") or name in ("settings", "scope", "conn", "usage_conn", "pool"):
             raise AttributeError(name)
-        if "pool" in self.__dict__:
+        if self.has_pool:
             raise AttributeError(
                 f"{name!r} is not reachable on a container serving requests: a request takes its"
                 " own scope from the pool (`request_scope`), and falling through here would put"
@@ -198,5 +205,5 @@ class Container:
         for name in ("conn", "usage_conn", "http_client"):
             if name in self.__dict__:
                 self.__dict__[name].close()
-        if "pool" in self.__dict__:
+        if self.has_pool:
             self.__dict__["pool"].close()

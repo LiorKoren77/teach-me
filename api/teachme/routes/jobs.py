@@ -51,10 +51,15 @@ def _authorize(scope: Scope, given: str | None) -> None:
 def _dispatch(scope: Scope, job_id: UUID, kind: str, payload: JobPayload) -> UUID | None:
     """One unit of work. An ingestion advances by exactly one step and hands the remainder to a
     new job, so a 400-page book is many short invocations instead of one that outlives the
-    function's duration limit; the generation kinds are already job-sized."""
+    function's duration limit; the generation kinds are already job-sized.
+
+    The hand-over is inline - the one place in the app where it has to be. Vercel may freeze this
+    instance the moment the response goes out, so a POST left on a daemon thread would take the
+    rest of the ingestion with it. It costs the runner's one-second read timeout, not the step
+    the next invocation is about to run."""
     if kind == INGEST_SOURCE:
         if scope.pipeline.run_next_step(UUID(payload["source_id"])):
-            return scope.job_runner.enqueue(INGEST_SOURCE, payload)
+            return scope.job_runner.enqueue_inline(INGEST_SOURCE, payload)
         return None
     handler = scope.job_handlers.get(kind)
     if handler is None:

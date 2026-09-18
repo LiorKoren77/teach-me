@@ -26,6 +26,16 @@ class ClaimedJob:
     attempts: int
 
 
+@dataclass(frozen=True)
+class QueuedJob:
+    """A job row still waiting for a delivery. What `requeue_stale_queued` hands back, for a
+    caller to post again; it is not claimed by being returned - claiming it is the receiver's."""
+
+    id: UUID
+    kind: str
+    payload: dict[str, Any]
+
+
 class JobRepository:
     def __init__(self, conn: psycopg.Connection) -> None:
         self._conn = conn
@@ -91,6 +101,23 @@ class JobRepository:
             (STALE_RUNNING_ERROR, older_than_seconds),
         ).fetchall()
         return [row["id"] for row in rows]
+
+    def requeue_stale_queued(self, older_than_seconds: int) -> list[QueuedJob]:
+        """Jobs that have been `queued` for longer than anyone should wait: a hand-over that was
+        accepted but whose invocation never ran, or one that died with the instance that was
+        about to post it. Nothing else will ever look at them - the running sweep only sees
+        `running` rows - so they are returned here to be posted again.
+
+        `updated_at` is touched as they are handed over, which is what stops two sweeps a moment
+        apart from delivering the same job twice; the status stays `queued`, because a delivery
+        is not a claim."""
+        rows = self._conn.execute(
+            "UPDATE jobs SET updated_at = now()"
+            " WHERE status = 'queued' AND updated_at < now() - make_interval(secs => %s)"
+            " RETURNING id, kind, payload",
+            (older_than_seconds,),
+        ).fetchall()
+        return [QueuedJob(**row) for row in rows]
 
     def set_status(self, job_id: UUID, status: str, *, error: str | None = None) -> None:
         self._conn.execute(

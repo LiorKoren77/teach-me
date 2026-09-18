@@ -287,3 +287,22 @@ def test_jobs_sweep_fails_a_job_whose_invocation_died(cli, db):
     assert str(stale) in result.output and str(fresh) not in result.output
     assert jobs.get(stale)["status"] == "failed"
     assert jobs.get(fresh)["status"] == "running"
+
+
+def test_jobs_kick_delivers_a_queued_job_nobody_picked_up(cli, db):
+    """A job row whose POST was accepted but never ran is invisible to everything else: no
+    invocation will touch it again, and the sweep only looks at `running` rows."""
+    app, pdf, _ = cli
+    assert runner.invoke(app, ["ingest", "--subject", "Geo", "--yes", str(pdf)]).exit_code == 0
+    db.rollback()
+    source_id = db.execute("SELECT id FROM sources").fetchone()["id"]
+
+    jobs = JobRepository(db)
+    forgotten = jobs.create("ingest_source", {"source_id": str(source_id)})
+    db.execute("UPDATE jobs SET updated_at = now() - interval '1 hour' WHERE id = %s", (forgotten,))
+    db.commit()
+
+    result = runner.invoke(app, ["jobs", "kick"])
+    assert result.exit_code == 0, result.output
+    assert str(forgotten) in result.output
+    assert jobs.get(forgotten)["status"] == "done"

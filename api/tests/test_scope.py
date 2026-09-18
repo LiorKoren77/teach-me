@@ -3,10 +3,14 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
+from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
 from pydantic import BaseModel
 
 from teachme.adapters.db.pool import make_pool
 from teachme.ports.llm import ContentPart, StructuredRequest
+from teachme.repositories.jobs import JobRepository
+from teachme.scope import Scope
 
 
 class Out(BaseModel):
@@ -71,3 +75,31 @@ def test_every_exit_path_returns_the_connection_to_the_pool(db, make_container, 
         assert scope.subjects.get_by_name("Leaky") is None
     stats = c.pool.get_stats()
     assert stats["pool_size"] == 1 and stats.get("requests_waiting", 0) == 0
+
+
+def test_mark_job_failed_does_not_compete_for_a_pooled_connection(db, make_container, migrated_database):
+    """The POST that failed runs on a thread of its own, long after the request that started it
+    has its pooled connection back - or, as here, while the request still holds the only one.
+    Waiting for the pool would mean the failure is never recorded, so a connection of its own is
+    opened, used and closed."""
+    container = make_container()
+    container.__dict__["pool"] = ConnectionPool(
+        migrated_database, min_size=1, max_size=1, open=True, timeout=1, kwargs={"row_factory": dict_row}
+    )
+    with container.pool.connection() as conn:  # the request holds the pool's only connection
+        scope = Scope(container, conn)
+        job_id = scope.jobs.create("ingest_source", {})
+        conn.commit()
+        scope.mark_job_failed(job_id, "ConnectError: nowhere")
+
+    db.rollback()
+    row = JobRepository(db).get(job_id)
+    assert row["status"] == "failed" and row["error"] == "ConnectError: nowhere"
+
+
+def test_a_container_knows_whether_it_is_serving_requests(db, make_container):
+    container = make_container()
+    assert container.has_pool is False
+    with container.request_scope():
+        pass
+    assert container.has_pool is True
