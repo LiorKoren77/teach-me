@@ -208,17 +208,43 @@ class AttemptRepository:
         )
         return result.rowcount
 
-    def increment_rejections(self, attempt_question_id: UUID) -> int:
-        row = self._conn.execute(
-            "UPDATE attempt_questions SET rejections = rejections + 1 WHERE id = %s RETURNING rejections",
-            (attempt_question_id,),
-        ).fetchone()
-        return int(row["rejections"])
+    def record_rejection(
+        self,
+        attempt_question_id: UUID,
+        *,
+        relevance_score: float | None,
+        band: RelevanceBand | None,
+        route: Route,
+        check_verdict: str | None,
+    ) -> int:
+        """Count a rejection and keep why it was rejected; returns the new count, 0 if nothing
+        was written because the question already carries a grade.
 
-    def answers_since_seconds(self, user_id: str, seconds: int) -> int:
+        `grade` stays NULL: the question is asked again. The relevance columns are written even
+        so, because a rejection that is not the final one used to leave no trace of the band, the
+        route or the check verdict that produced it - and the check verdict cost a model call.
+        """
+        row = self._conn.execute(
+            "UPDATE attempt_questions SET rejections = rejections + 1, last_rejected_at = now(),"
+            " relevance_score = %s, relevance_band = %s, route = %s, check_verdict = %s"
+            " WHERE id = %s AND grade IS NULL RETURNING rejections",
+            (
+                relevance_score,
+                band.value if band else None,
+                route.value,
+                check_verdict,
+                attempt_question_id,
+            ),
+        ).fetchone()
+        return int(row["rejections"]) if row else 0
+
+    def submissions_since_seconds(self, user_id: str, seconds: int) -> int:
+        """Answers and rejections in the window: a rejected submission is what the rate limit is
+        there for, since an off-topic answer can still reach the relevance check."""
         row = self._conn.execute(
             "SELECT count(*) AS n FROM attempt_questions aq JOIN attempts a ON a.id = aq.attempt_id"
-            " WHERE a.user_id = %s AND aq.answered_at >= now() - make_interval(secs => %s)",
+            " WHERE a.user_id = %s AND greatest(aq.answered_at, aq.last_rejected_at)"
+            " >= now() - make_interval(secs => %s)",
             (user_id, seconds),
         ).fetchone()
         return int(row["n"])

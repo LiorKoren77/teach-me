@@ -71,7 +71,18 @@ def test_attempts_lifecycle(db):
     aq = repo.add_questions(attempt.id, round_no=1, question_ids=[q.id])[0]
     assert aq.position == 0 and aq.grade is None
     assert repo.next_unanswered(attempt.id) == aq
-    assert repo.increment_rejections(aq.id) == 1 and repo.get_question(aq.id).rejections == 1
+    rejected = repo.record_rejection(
+        aq.id,
+        relevance_score=0.1,
+        band=RelevanceBand.LOW,
+        route=Route.REJECT_OFF_TOPIC,
+        check_verdict="off_topic",
+    )
+    assert rejected == 1
+    stored = repo.get_question(aq.id)
+    assert stored.rejections == 1 and stored.grade is None  # a rejection never closes the question
+    assert stored.route == Route.REJECT_OFF_TOPIC and stored.relevance_band == RelevanceBand.LOW
+    assert repo.submissions_since_seconds("user_1", 60) == 1  # a rejection counts as a submission
     repo.record_answer(
         aq.id,
         answer_text="my answer",
@@ -90,7 +101,7 @@ def test_attempts_lifecycle(db):
     assert answered[0].feedback == "ok" and answered[0].rubric_covered == (0,)
     assert repo.next_unanswered(attempt.id) is None
     assert repo.asked_question_ids(attempt.id) == {q.id}
-    assert repo.answers_since_seconds("user_1", 60) == 1
+    assert repo.submissions_since_seconds("user_1", 60) == 1
     repo.add_reexplanation(
         attempt.id, round_no=1, section_ids=[q.section_id], language="he", body="again", model="m"
     )

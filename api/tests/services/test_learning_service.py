@@ -11,6 +11,7 @@ from teachme.domain.models import (
     PartStatus,
     Question,
     QuestionKind,
+    RelevanceBand,
     Route,
 )
 from teachme.grading.grader import GradeOut
@@ -188,7 +189,7 @@ def test_relevance_routing_rejects_junk_and_off_topic_answers(env):
     assert not off.accepted and off.grade == Grade.OFF_TOPIC
     assert off.next_question.attempt_question_id != q.attempt_question_id
     recorded = c.attempts.get_question(q.attempt_question_id)
-    assert recorded.route.value == "check" and recorded.check_verdict == "off_topic"
+    assert recorded.route == Route.REJECT_OFF_TOPIC and recorded.check_verdict == "off_topic"
     assert recorded.rejections == 2
 
     # a clearly on-topic answer skips the rejection path and reaches the grader
@@ -379,3 +380,53 @@ def test_a_round_already_sampled_elsewhere_is_reported_as_unfinished(env, db):
 
     with pytest.raises(LearningError, match="not finished"):
         c.learning_service.begin_round(USER, session.attempt_id)
+
+
+def test_rejections_are_stored_bounded_and_count_toward_the_rate_limit(env):
+    """A rejected answer is not kept whole and is not free: the oversized text is dropped, the
+    relevance telemetry of a non-final rejection is kept, and the submission counts."""
+    c, subject, fake = env
+    fake.set_responder(RelevanceVerdict, lambda req: RelevanceVerdict(verdict="off_topic"))
+    c.settings.max_rejections_per_question = 3
+    session = c.learning_service.start_part(USER, subject, position=0, language="en")
+    question = c.learning_service.begin_round(USER, session.attempt_id)
+
+    too_long = "ozone " * c.settings.max_answer_chars
+    first = c.learning_service.submit_answer(
+        USER, session.attempt_id, question.attempt_question_id, answer_text=too_long
+    )
+    assert not first.accepted and first.rejection_reason == "too_long"
+    stored = c.attempts.get_question(question.attempt_question_id)
+    assert stored.answer_text is None and stored.grade is None and stored.rejections == 1
+    assert stored.route == Route.REJECT_JUNK and stored.relevance_band == RelevanceBand.JUNK
+
+    off = c.learning_service.submit_answer(
+        USER, session.attempt_id, question.attempt_question_id, answer_text="I love football and pizza"
+    )
+    assert not off.accepted and off.rejection_reason == "off_topic"
+    stored = c.attempts.get_question(question.attempt_question_id)
+    assert stored.route == Route.REJECT_OFF_TOPIC and stored.check_verdict == "off_topic"
+    assert stored.relevance_band is not None and stored.grade is None and stored.rejections == 2
+
+    # a non-final off-topic rejection still costs a relevance-check call, so it is rate limited
+    # (the window counts questions submitted to, and a rejection alone used to count for nothing)
+    assert c.attempts.submissions_since_seconds(USER, 60) == 1
+    c.settings.max_answers_per_minute = 1
+    with pytest.raises(NotAllowed, match="rate"):
+        c.learning_service.submit_answer(
+            USER, session.attempt_id, question.attempt_question_id, answer_text="pizza again tonight"
+        )
+
+
+def test_a_final_oversized_answer_is_not_persisted(env):
+    c, subject, fake = env
+    session = c.learning_service.start_part(USER, subject, position=0, language="en")
+    question = c.learning_service.begin_round(USER, session.attempt_id)
+    too_long = "ozone " * c.settings.max_answer_chars
+    for _ in range(c.settings.max_rejections_per_question):
+        result = c.learning_service.submit_answer(
+            USER, session.attempt_id, question.attempt_question_id, answer_text=too_long
+        )
+    assert result.grade == Grade.JUNK  # the last rejection scores the question wrong
+    stored = c.attempts.get_question(question.attempt_question_id)
+    assert stored.answer_text is None  # an answer rejected for its size is never kept

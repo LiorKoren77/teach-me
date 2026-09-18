@@ -57,6 +57,9 @@ CREATE TABLE attempt_questions (
   feedback         text,
   rejections       int  NOT NULL DEFAULT 0 CHECK (rejections >= 0),
   answered_at      timestamptz,
+  -- A rejected answer is still a submission that may have cost a relevance-check call, so the
+  -- per-minute rate limit counts rejections as well as answers.
+  last_rejected_at timestamptz,
   UNIQUE (attempt_id, round_no, position)
 );
 CREATE INDEX attempt_questions_question_idx ON attempt_questions(question_id);

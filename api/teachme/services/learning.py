@@ -249,7 +249,7 @@ class LearningService:
         if aq.attempt_id != attempt.id or aq.grade is not None:
             raise NotAllowed("question is not open for answering")
         if (
-            self.d.attempts.answers_since_seconds(user_id, RATE_WINDOW_SECONDS)
+            self.d.attempts.submissions_since_seconds(user_id, RATE_WINDOW_SECONDS)
             >= self.d.settings.max_answers_per_minute
         ):
             raise NotAllowed("rate limit: too many answers in the last minute")
@@ -339,7 +339,7 @@ class LearningService:
                     answer,
                     reason="off_topic",
                     band=relevance.band,
-                    route=Route.CHECK,
+                    route=Route.REJECT_OFF_TOPIC,
                     grade_if_final=Grade.OFF_TOPIC,
                     check_verdict=check_verdict,
                     score=relevance.score,
@@ -457,8 +457,20 @@ class LearningService:
         check_verdict: str | None,
         score: float | None = None,
     ) -> AnswerResult:
-        """An answer that is not an attempt at the question: asked again, until the cap is reached."""
-        count = self.d.attempts.increment_rejections(aq.id)
+        """An answer that is not an attempt at the question: asked again, until the cap is reached.
+
+        Every rejection is recorded - it counts towards the rate limit and carries the band, the
+        route and the check verdict that rejected it - but the text itself is only kept bounded:
+        an answer rejected for its size is not stored at all."""
+        count = self.d.attempts.record_rejection(
+            aq.id,
+            relevance_score=score,
+            band=band,
+            route=route,
+            check_verdict=check_verdict,
+        )
+        if count == 0:
+            raise NotAllowed("question is not open for answering")
         if count < self.d.settings.max_rejections_per_question:
             self.d.conn.commit()
             current = self._question_view(attempt, self.d.attempts.get_question(aq.id), subject)
@@ -470,9 +482,10 @@ class LearningService:
                 next_question=current,
             )
         feedback = message(attempt.language, "rejected_final")
+        bounded = None if reason == "too_long" else answer[: self.d.settings.max_answer_chars]
         self._record_answer(
             aq.id,
-            answer_text=answer,
+            answer_text=bounded,
             answer_choice=None,
             relevance_score=score,
             band=band,
