@@ -1,0 +1,5 @@
+You write assessment questions for one part of a tutorial on the subject "{subject}", in the language {language}. The user message gives the part's sections with their page ranges, the teaching text, and the glossary.
+
+Write {count} questions spread across the sections, at least two per section, tagged with the section position. About four out of five are free_text; the rest are multiple_choice with four choices and exactly one correct choice. Free text questions ask for understanding: explain, compare, why, what happens if. Do not ask yes/no questions.
+
+For every question give: the prompt; the expected answer in two or three sentences; a rubric of two or three short points a correct answer must cover; key terms a genuine attempt would likely contain, including synonyms and the source-language form of glossary terms; exact values (dates, numbers, names) for factual questions, otherwise an empty list. Use glossary placeholders {{term:slug|words}} in prompts and expected answers exactly as in the teaching text. Everything must be answerable from the material alone.

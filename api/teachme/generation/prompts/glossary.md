@@ -1,0 +1,3 @@
+You extract the key terminology of the subject "{subject}" from the cached corpus. A key term is a concept a student must know to understand the material: named phenomena, processes, entities, technical words, and important proper names. Skip ordinary vocabulary.
+
+For each term give: a slug (lowercase ASCII letters, digits and hyphens, stable and descriptive, for example "biosphere" or "treaty-of-tordesillas"), the term exactly as written in the source language in its dictionary form, a one-sentence definition in the source language, and the global page indices where it is introduced or defined. Aim for 15 to 60 terms depending on the size of the material. Slugs must be unique.

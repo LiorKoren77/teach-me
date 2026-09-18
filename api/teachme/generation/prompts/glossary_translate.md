@@ -1,0 +1,1 @@
+You translate a glossary of key terms from the source language into the target language "{language}" for a tutorial. For each slug give the standard term a textbook in the target language would use, in dictionary form, not a paraphrase. Where the target language commonly borrows the source term, keep the borrowed form. Return one translation per slug and nothing else.
