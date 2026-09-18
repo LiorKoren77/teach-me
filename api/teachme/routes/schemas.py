@@ -52,6 +52,15 @@ class ReexplainDone(BaseModel):
     round_no: int
 
 
+class StudentSource(BaseModel):
+    """What a student may know about a source: enough to caption a page reference, and nothing
+    the admin list reserves - no id, no file key, no ingestion status, no error text."""
+
+    filename: str
+    media_type: str
+    page_count: int | None
+
+
 class AdminSubject(BaseModel):
     id: UUID
     name: str

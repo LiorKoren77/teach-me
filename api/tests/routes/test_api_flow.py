@@ -187,3 +187,26 @@ def test_the_rate_limit_answers_429(api):
         json={"attempt_question_id": question["attempt_question_id"], "answer_text": ANSWER},
     )
     assert res.status_code == 429 and res.json()["detail"].startswith("rate limit")
+
+
+def test_student_sees_read_only_source_list(api):
+    client, subject, *_ = api
+    response = client.get(f"/api/subjects/{subject.id}/sources")
+    assert response.status_code == 200
+    assert response.json() == [{"filename": "ch1.pdf", "media_type": "application/pdf", "page_count": 6}]
+
+
+def test_the_student_source_list_keeps_what_the_admin_one_reserves(api):
+    client, subject, user, _fake = api
+    student = client.get(f"/api/subjects/{subject.id}/sources").json()[0]
+    user["role"] = "admin"
+    admin = client.get(f"/api/admin/subjects/{subject.id}/sources").json()[0]
+    user["role"] = "student"
+    assert set(admin) - set(student) == {"id", "status", "detected_language", "error"}
+    assert "file_key" not in admin and "file_key" not in student
+
+    # and a subject that is not published has no source list for a student at all
+    draft = client.app.state.container.scope.subject_service.get_or_create("Draft", ["en"])
+    assert client.get(f"/api/subjects/{draft.id}/sources").status_code == 403
+    missing = "00000000-0000-0000-0000-000000000000"
+    assert client.get(f"/api/subjects/{missing}/sources").status_code == 404

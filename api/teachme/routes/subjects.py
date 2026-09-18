@@ -5,9 +5,10 @@ from uuid import UUID
 from fastapi import APIRouter
 
 from teachme.auth.clerk import CurrentUser
-from teachme.domain.models import PartStatus, Subject, SubjectState
+from teachme.domain.models import PartStatus, SourceStatus, Subject, SubjectState
 from teachme.routes.deps import ScopeDep
-from teachme.routes.schemas import SubjectSummary
+from teachme.routes.schemas import StudentSource, SubjectSummary
+from teachme.services.learning import NotAllowed
 from teachme.services.learning_views import SubjectView
 
 router = APIRouter(prefix="/api/subjects", tags=["subjects"])
@@ -45,3 +46,17 @@ def list_subjects(user: CurrentUser, scope: ScopeDep) -> list[SubjectSummary]:
 @router.get("/{subject_id}", response_model=SubjectView)
 def open_subject(subject_id: UUID, user: CurrentUser, scope: ScopeDep) -> SubjectView:
     return scope.learning_service.open_subject(user.user_id, scope.subjects.get(subject_id))
+
+
+@router.get("/{subject_id}/sources", response_model=list[StudentSource])
+def sources(subject_id: UUID, user: CurrentUser, scope: ScopeDep) -> list[StudentSource]:
+    """The material behind a published subject, so the reader can see what is being taught from.
+    Sources still being ingested are left out: a student has no use for a half-read file."""
+    subject = scope.subjects.get(subject_id)
+    if subject.state != SubjectState.PUBLISHED:
+        raise NotAllowed(f"subject {subject.name!r} is not published")
+    return [
+        StudentSource(filename=s.filename, media_type=s.media_type, page_count=s.page_count)
+        for s in scope.sources.list_by_subject(subject.id)
+        if s.status == SourceStatus.READY
+    ]

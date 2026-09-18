@@ -81,6 +81,7 @@ without it every token is treated as a student, since a missing `role` claim fal
 | POST | `/api/attempts/{attempt_id}/round` | student | Sample and begin the attempt's next round of questions. |
 | POST | `/api/attempts/{attempt_id}/answer` | student | Submit an answer (free text or multiple-choice) for the current question; grades it and returns the next question or the round result. |
 | GET | `/api/attempts/{attempt_id}/reexplain` | student | Server-sent-event stream that re-explains the weak sections of a failed round. |
+| GET | `/api/subjects/{subject_id}/sources` | student | The material a published subject teaches from: filename, media type and page count of each fully ingested source. Deliberately narrower than the admin list - no ids, no ingestion status, no error text, and never a file key. |
 | GET | `/api/subjects/{subject_id}/pages/{global_index}/image` | student | PNG of one page of a published subject's material, by the global page index its teaching text refers to. Rendered from the PDF on first request and cached in the file store under `thumbnails/{source_id}/NNN-w{width}.png`, so a page is rasterized at most once. |
 | GET | `/api/admin/subjects` | admin | List every subject regardless of publication state. |
 | GET | `/api/admin/subjects/{subject_id}/sources` | admin | List a subject's ingested sources and their status. |
