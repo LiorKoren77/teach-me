@@ -200,8 +200,12 @@ itself names pages by their printed number, which is not a corpus index.
 
 The admin pane does over HTTP exactly what the CLI does: `POST .../sources` calls the same
 `SourceService.register` and queues the same `ingest_source` job as `teachme ingest`, so no part
-of ingestion knows which of the two put the file there. An upload is refused before its body is
-stored when `Content-Length` exceeds `MAX_UPLOAD_BYTES` (`413`), and refused by the service when
+of ingestion knows which of the two put the file there. An upload that declares a `Content-Length`
+over `MAX_UPLOAD_BYTES` is refused with `413` by a middleware in front of the router, before the
+body is read at all - it has to be there, because FastAPI parses the whole multipart form before
+the endpoint's first line runs. A chunked body declares no length, so those are measured after
+the form is parsed and refused with the same `413`; the bytes have been received by then, which
+is as early as anything can tell. An upload is refused by the service when
 the type is one the configured LLM adapter cannot read (`415`) or the subject is published
 (`409`) - a published subject is locked against upload, delete, reingest and generate, though its
 sources stay visible. The response carries the registered source and the `job_id` to poll at
@@ -263,7 +267,7 @@ wins when one refusal subclasses another):
 | 409 | `QuestionClosed` | A `LearningError` subclass: the question is not open for answering - it already carries a grade, or it belongs to another attempt. A conflict with the state of the round, which is why it is not the `403` a foreign attempt gets. |
 | 409 | `InvalidChoice` | A `LearningError` subclass: a multiple-choice submission that is not one of the question's options - no choice at all, or an index past the last one (the route refuses a negative index as a `422`). |
 | 409 | `UnmappedQuestion` | An answered row referencing a question that is no longer in the part's bank. The foreign key cascades, so this is a guard rather than a path a request normally takes - but it names the row instead of surfacing as a `500`. |
-| 413 | `UploadTooLarge` | An admin upload whose `Content-Length` (or, for a chunked body, whose bytes) exceeds `MAX_UPLOAD_BYTES`. Refused before the file is stored. |
+| 413 | `UploadTooLarge` | An admin upload whose bytes exceed `MAX_UPLOAD_BYTES`, when it arrives chunked and so declares no length. A declared `Content-Length` over the limit is answered with the same status by the middleware in front of the router, which never reaches this error. |
 | 415 | `UnsupportedMediaType` | An upload whose type the configured LLM adapter cannot read, or which `ALLOWED_UPLOAD_TYPES` excludes. `GET /api/admin/capabilities` lists what it would accept. |
 | 422 | *(FastAPI's built-in request validation, not in this table)* | A malformed request body - e.g. `AnswerRequest` requires exactly one of `answer_text`/`answer_choice`, and rejects neither or both. |
 

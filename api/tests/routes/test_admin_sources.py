@@ -44,6 +44,20 @@ def upload(client, subject, file=PDF):
     return client.post(f"/api/admin/subjects/{subject.id}/sources", files={"file": file})
 
 
+BOUNDARY = "teachmeboundary"
+MULTIPART = f"multipart/form-data; boundary={BOUNDARY}"
+
+
+def multipart_body(filename: str, data: bytes, media_type: str) -> bytes:
+    """A multipart body built by hand, so a test can send it in a way httpx would not."""
+    head = (
+        f"--{BOUNDARY}\r\n"
+        f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
+        f"Content-Type: {media_type}\r\n\r\n"
+    )
+    return head.encode() + data + f"\r\n--{BOUNDARY}--\r\n".encode()
+
+
 def test_capabilities_describe_what_the_file_picker_may_offer(make_admin):
     client, *_ = make_admin()
     body = client.get("/api/admin/capabilities").json()
@@ -82,6 +96,39 @@ def test_a_body_over_the_limit_is_413_before_it_is_stored(make_admin):
     client, container, subject, _ = make_admin(max_upload_bytes=512)
     response = upload(client, subject)
     assert response.status_code == 413 and set(response.json()) == {"detail"}
+    assert client.get(f"/api/admin/subjects/{subject.id}/sources").json() == []
+
+
+def test_an_oversized_body_is_refused_before_the_form_is_parsed(make_admin):
+    """FastAPI parses the whole multipart form before the endpoint's first line runs, so a check
+    inside the endpoint has already cost the upload. This body is not valid multipart at all: it
+    would be a 400 from the parser if anything got that far, and is a 413 because nothing does."""
+    client, _, subject, _ = make_admin(max_upload_bytes=512)
+    response = client.post(
+        f"/api/admin/subjects/{subject.id}/sources",
+        content=b"not a multipart body at all" + b"x" * 2000,
+        headers={"content-type": MULTIPART},
+    )
+    assert response.status_code == 413, response.text
+    assert set(response.json()) == {"detail"} and "512" in response.json()["detail"]
+
+
+def test_an_oversized_chunked_body_is_refused_too(make_admin):
+    """A chunked body declares no Content-Length, so the middleware has nothing to test: the
+    endpoint's own byte check is what refuses it, after the form is parsed."""
+    client, _, subject, _ = make_admin(max_upload_bytes=512)
+    body = multipart_body(*PDF)
+
+    def stream():
+        for start in range(0, len(body), 64):
+            yield body[start : start + 64]
+
+    response = client.post(
+        f"/api/admin/subjects/{subject.id}/sources",
+        content=stream(),
+        headers={"content-type": MULTIPART},
+    )
+    assert response.status_code == 413, response.text
     assert client.get(f"/api/admin/subjects/{subject.id}/sources").json() == []
 
 

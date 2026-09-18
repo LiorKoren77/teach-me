@@ -53,8 +53,9 @@ class Settings(BaseSettings):
     enabled_languages: list[str] = ["he", "en", "pt"]
     allowed_upload_types: list[str] | None = None
     max_pages_per_source: int = 400
-    # The largest upload the admin route accepts, checked against Content-Length before the body
-    # is read. Vercel itself refuses a request body over 100 MB, so this can only narrow that.
+    # The largest upload the admin route accepts. A declared Content-Length over it is refused by
+    # a middleware before the body is read; a chunked body is measured once the form is parsed.
+    # Vercel itself refuses a request body over 100 MB, so this can only narrow that.
     max_upload_bytes: int = 50 * 1024 * 1024
     pages_per_read_batch: int = 6
     pages_per_chunk_batch: int = 6
