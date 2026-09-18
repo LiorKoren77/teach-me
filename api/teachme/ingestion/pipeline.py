@@ -101,6 +101,10 @@ class IngestionPipeline:
 
         self.d.pages.replace(source.id, extraction.pages)
         self.d.figures.replace(source.id, extraction.figures)
+        # A re-ingest replaces the pages, so chunks from the previous run no longer match them.
+        # Drop them here, in the same transaction, rather than leave them searchable until the
+        # new chunks are indexed (or forever, if this run fails).
+        self.d.search.delete_by_source(source.id)
         language = detect_language(self.d.llm, self.d.settings.model_detect_language, extraction.pages)
         self.d.sources.set_extraction_result(
             source.id,

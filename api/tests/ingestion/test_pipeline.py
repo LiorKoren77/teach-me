@@ -141,3 +141,30 @@ def test_published_subject_is_locked(env):
     deps.conn.commit()
     with pytest.raises(SubjectLocked):
         IngestionPipeline(deps).ingest_source(source.id)
+
+
+def test_reingest_clears_previous_chunks_before_extraction(env):
+    deps, subject, source, fake_llm = env
+    pipeline = IngestionPipeline(deps)
+    assert pipeline.ingest_source(source.id).status == SourceStatus.READY
+    assert deps.search.count(subject.id) == 5
+
+    calls = {"n": 0}
+    good = default_responders()[ChunksOut]
+
+    def flaky(request):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("upstream hiccup")
+        return good(request)
+
+    fake_llm.set_responder(ChunksOut, flaky)
+    deps.sources.set_status(source.id, SourceStatus.UPLOADED)
+    deps.conn.commit()
+
+    with pytest.raises(RuntimeError):
+        pipeline.ingest_source(source.id)
+    assert deps.search.count(subject.id) == 0  # no stale chunks alongside the new pages
+
+    assert pipeline.ingest_source(source.id).status == SourceStatus.READY
+    assert deps.search.count(subject.id) == 5
