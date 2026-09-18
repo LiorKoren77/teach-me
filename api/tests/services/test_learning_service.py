@@ -35,6 +35,9 @@ def env(db, migrated_database, tmp_path):
     c.tutorial_service.generate(subject)
     subject = c.tutorial_service.publish(subject)
     fake = c.llm.inner  # the FakeLLM under the recorder
+    # A generic answer is not lexically close to a generated question, so the round routes through
+    # the relevance check by default; the tests that exercise rejection override this responder.
+    fake.set_responder(RelevanceVerdict, lambda req: RelevanceVerdict(verdict="on_topic"))
     yield c, subject, fake
     c.close()
 

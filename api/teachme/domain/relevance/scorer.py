@@ -1,27 +1,33 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+import re
+import unicodedata
+from collections.abc import Sequence
 from difflib import SequenceMatcher
 
-from pydantic import BaseModel, ConfigDict
-
-from teachme.domain.models import Question, RelevanceBand
+from teachme.domain.models import Frozen, Question, RelevanceBand
 from teachme.domain.text.normalize import normalize, tokenize
 
-MIN_TOKENS_FOR_JUDGEMENT = 3
+MIN_WORDS_FOR_JUDGEMENT = 3
+"""Distinct words of the student's own, counted on the answer itself rather than on the
+tokenizer's output: Hebrew emits a prefix-stripped variant per word, and counting those made a
+two-word Hebrew answer look judgeable while the same answer in English did not."""
+
 FUZZY_RATIO = 0.8
+PREFIX_MIN_CHARS = 7
+PREFIX_MIN_SHARE = 0.7
+"""A shared prefix counts as the same word only when it is long in absolute terms and covers
+most of the shorter token: "prote" is neither, so "protects" is not a hit for "protein"."""
+
+_WORD = re.compile(r"\w+", re.UNICODE)
 
 
-class RelevanceThresholds(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class RelevanceThresholds(Frozen):
     high: float = 0.5
     low: float = 0.15
 
 
-class RelevanceSignals(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class RelevanceSignals(Frozen):
     answer_tokens: int
     key_term_hits: int
     key_terms_total: int
@@ -30,34 +36,66 @@ class RelevanceSignals(BaseModel):
     echo_ratio: float  # share of answer tokens copied from the question
 
 
-class RelevanceResult(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class RelevanceResult(Frozen):
     score: float
     band: RelevanceBand
     signals: RelevanceSignals
 
 
-def _fuzzy_contains(term: str, tokens: Iterable[str], answer_norm: str) -> bool:
-    """A key term matches if any answer token is close to it, or if the whole phrase appears."""
-    term_norm = normalize(term)
-    if term_norm in answer_norm:
-        return True
-    term_tokens = term_norm.split()
-    if len(term_tokens) > 1:
-        return False
-    for token in tokens:
-        if token == term_norm or SequenceMatcher(None, token, term_norm).ratio() >= FUZZY_RATIO:
+def _words(text: str) -> set[str]:
+    return set(_WORD.findall(normalize(text)))
+
+
+def _fold(text: str) -> str:
+    """Accent-blind form for comparing words: "radiacao" typed without diacritics is the same
+    word as "radiação", and a student should not lose a key term over a keyboard."""
+    return "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c))
+
+
+def _whole_word(needle: str, haystack: str) -> bool:
+    """`\\b`-style anchoring, spelled with lookarounds so a needle that begins or ends in
+    punctuation still anchors on the word next to it: "ion" must not match inside "nation",
+    nor "1789" inside "17890"."""
+    return re.search(rf"(?<!\w){re.escape(_fold(needle))}(?!\w)", _fold(haystack)) is not None
+
+
+def _common_prefix(left: str, right: str) -> int:
+    shared = 0
+    for a, b in zip(left, right, strict=False):
+        if a != b:
+            break
+        shared += 1
+    return shared
+
+
+def _fuzzy_token(term: str, tokens: Sequence[str]) -> bool:
+    """One answer token close enough to the term: an inflection or a typo, not a shared stem."""
+    folded_term = _fold(term)
+    for raw in tokens:
+        token = _fold(raw)
+        if token == folded_term or SequenceMatcher(None, token, folded_term).ratio() >= FUZZY_RATIO:
             return True
-        if len(token) >= 5 and len(term_norm) >= 5:
-            if token.startswith(term_norm[:5]) or term_norm.startswith(token[:5]):
-                return True
+        shared = _common_prefix(token, folded_term)
+        if shared >= PREFIX_MIN_CHARS and shared >= PREFIX_MIN_SHARE * min(len(token), len(folded_term)):
+            return True
     return False
+
+
+def _term_matches(term: str, tokens: Sequence[str], answer_norm: str) -> bool:
+    """A key term hits when the whole phrase appears as words, or when every word of the term
+    finds a fuzzy match among the answer's tokens - in any order, so a multi-word term matches
+    "a layer of ozone" as well as "the ozone layer"."""
+    term_norm = normalize(term)
+    if _whole_word(term_norm, answer_norm):
+        return True
+    term_tokens = _WORD.findall(term_norm)
+    return bool(term_tokens) and all(_fuzzy_token(word, tokens) for word in term_tokens)
 
 
 def score_relevance(
     answer: str,
     question: Question,
+    *,
     section_vocabulary: frozenset[str],
     language_code: str,
     thresholds: RelevanceThresholds | None = None,
@@ -70,9 +108,14 @@ def score_relevance(
     answer_norm = normalize(answer)
     tokens = tokenize(answer, language_code)
     question_tokens = set(tokenize(question.prompt, language_code))
+    content_words = _words(answer) - _words(question.prompt)
 
-    exact_hit = any(normalize(v) in answer_norm for v in question.exact_values if v.strip())
-    hits = sum(1 for term in question.key_terms if _fuzzy_contains(term, tokens, answer_norm))
+    exact_hit = any(
+        _whole_word(normalize(value), answer_norm) or normalize(value) in tokens
+        for value in question.exact_values
+        if value.strip()
+    )
+    hits = sum(1 for term in question.key_terms if term.strip() and _term_matches(term, tokens, answer_norm))
     non_echo = [t for t in tokens if t not in question_tokens]
     echo_ratio = 1.0 - (len(non_echo) / len(tokens)) if tokens else 0.0
     overlap = (sum(1 for t in non_echo if t in section_vocabulary) / len(non_echo)) if non_echo else 0.0
@@ -88,7 +131,7 @@ def score_relevance(
 
     if exact_hit:
         return RelevanceResult(score=1.0, band=RelevanceBand.HIGH, signals=signals)
-    if len(non_echo) < MIN_TOKENS_FOR_JUDGEMENT:
+    if len(content_words) < MIN_WORDS_FOR_JUDGEMENT:
         return RelevanceResult(score=0.0, band=RelevanceBand.UNCERTAIN, signals=signals)
 
     term_ratio = hits / len(question.key_terms) if question.key_terms else 0.0

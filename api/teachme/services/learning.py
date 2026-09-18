@@ -294,7 +294,7 @@ class LearningService:
         vocab = self.d.corpus_cache.section_vocabulary(
             subject, corpus, section.page_start, section.page_end, language
         )
-        relevance = score_relevance(answer, question, vocab, language)
+        relevance = score_relevance(answer, question, section_vocabulary=vocab, language_code=language)
         route = route_for_band(relevance.band)
         check_verdict = None
         if route == Route.CHECK:
