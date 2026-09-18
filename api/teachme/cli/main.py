@@ -314,10 +314,13 @@ def tutorial_status(subject: str = typer.Option(..., "--subject", "-s")) -> None
             f"published v{status.published_version}, {status.parts} parts"
         )
         for lang in status.languages:
-            typer.echo(
+            line = (
                 f"  {lang.language}: {lang.parts_ready}/{lang.parts_total} parts ready, "
                 f"{lang.questions} questions, complete: {'yes' if lang.complete else 'no'}"
             )
+            if lang.failed:
+                line += f", failed: {list(lang.failed)}"
+            typer.echo(line)
         typer.echo(f"publishable: {'yes' if status.publishable else 'no'}")
 
     _run(body)

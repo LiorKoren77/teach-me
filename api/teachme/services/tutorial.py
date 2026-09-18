@@ -72,6 +72,7 @@ class LanguageStatus(BaseModel):
     parts_total: int
     questions: int
     complete: bool
+    failed: tuple[int, ...] = ()
 
 
 class TutorialStatus(BaseModel):
@@ -412,6 +413,7 @@ class TutorialService:
             )
         parts = self._outlines.parts(outline.id)
         ready = self._content.languages_ready(outline.id)
+        failed = self._content.languages_failed(outline.id)
         languages: list[LanguageStatus] = []
         for language in subject.languages:
             counts = [self._questions.count_by_section(p.id, language) for p in parts]
@@ -428,6 +430,7 @@ class TutorialService:
                     parts_total=len(parts),
                     questions=total_questions,
                     complete=parts_ready == len(parts) and enough,
+                    failed=failed.get(language, ()),
                 )
             )
         return TutorialStatus(

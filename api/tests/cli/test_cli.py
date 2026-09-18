@@ -5,6 +5,8 @@ from typer.testing import CliRunner
 
 from teachme.adapters.db.migrate import SchemaOutOfDate
 from teachme.container import Container
+from teachme.generation.teaching import TeachingOut
+from teachme.ports.llm import LLMError
 from teachme.settings import Settings
 from tests.helpers import make_pdf
 
@@ -175,3 +177,31 @@ def test_generate_rejects_an_unknown_part(cli):
     result = runner.invoke(app, ["generate", "--subject", "Geo", "--part", "9"])
     assert result.exit_code == 1
     assert "error: no such parts: [9]" in result.output
+
+
+def test_tutorial_status_counts_ready_parts_and_names_failed_parts(cli):
+    import teachme.cli.main as main
+
+    app, pdf, tmp_path = cli
+    multipart = tmp_path / "ch2.pdf"
+    multipart.write_bytes(make_pdf(6))
+    assert runner.invoke(app, ["ingest", "--subject", "Geo", "--yes", str(multipart)]).exit_code == 0
+    assert runner.invoke(app, ["generate", "--subject", "Geo", "--language", "he"]).exit_code == 0
+    result = runner.invoke(app, ["generate", "--subject", "Geo", "--language", "en", "--part", "1"])
+    assert result.exit_code == 0 and "outline v1" in result.output
+
+    result = runner.invoke(app, ["tutorial", "status", "--subject", "Geo"])
+    assert result.exit_code == 0, result.output
+    assert "he: 2/2 parts ready" in result.output
+    assert "en: 1/2 parts ready" in result.output
+    assert "failed" not in result.output
+
+    def boom(request):
+        raise LLMError("teaching service down")
+
+    main.build_container().llm.inner.set_responder(TeachingOut, boom)
+    result = runner.invoke(app, ["generate", "--subject", "Geo", "--language", "he", "--part", "0"])
+    assert result.exit_code == 1
+
+    result = runner.invoke(app, ["tutorial", "status", "--subject", "Geo"])
+    assert "he: 1/2 parts ready" in result.output and "failed: [0]" in result.output

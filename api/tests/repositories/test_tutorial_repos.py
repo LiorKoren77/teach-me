@@ -125,7 +125,8 @@ def test_part_and_section_content(db):
     assert [s.title for s in content.sections(parts[0].id, "he")] == ["מה", "למה"]
     content.upsert_part(loaded.model_copy(update={"status": ContentStatus.FAILED, "error": "boom"}))
     assert content.part(parts[0].id, "he").error == "boom"
-    assert content.languages_ready(outline.id) == {}  # part 2 has no content yet
+    assert content.languages_ready(outline.id) == {}  # nothing is ready yet
+    assert content.languages_failed(outline.id) == {"he": (0,)}
     content.upsert_part(
         PartContent(
             part_id=parts[1].id,
@@ -137,8 +138,10 @@ def test_part_and_section_content(db):
             model="m",
         )
     )
+    assert content.languages_ready(outline.id) == {"he": 1}  # the true count, not all-or-nothing
     content.upsert_part(loaded)  # back to READY
     assert content.languages_ready(outline.id) == {"he": 2}
+    assert content.languages_failed(outline.id) == {}
 
 
 def test_questions_replace_and_query(db):

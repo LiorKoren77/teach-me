@@ -213,3 +213,21 @@ def test_publish_picks_the_newest_complete_version(container):
 
     published = container.tutorial_service.publish(subject)
     assert published.state == SubjectState.PUBLISHED and published.current_outline_version == 1
+
+
+def test_status_reports_per_part_readiness_and_failed_parts(container):
+    subject = _ingested_subject(container)
+    container.tutorial_service.generate(subject)
+
+    def boom(request):
+        raise LLMError("teaching service down")
+
+    container.llm.inner.set_responder(TeachingOut, boom)
+    container.tutorial_service.generate(subject, languages=["he"], parts=[0])
+
+    status = container.tutorial_service.status(subject)
+    he = next(lang for lang in status.languages if lang.language == "he")
+    en = next(lang for lang in status.languages if lang.language == "en")
+    assert he.parts_ready == he.parts_total - 1 and not he.complete and he.failed == (0,)
+    assert en.parts_ready == en.parts_total and en.complete and en.failed == ()
+    assert not status.publishable

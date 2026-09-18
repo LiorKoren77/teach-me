@@ -74,13 +74,25 @@ class ContentRepository:
         ]
 
     def languages_ready(self, outline_id: UUID) -> dict[str, int]:
-        """language -> number of parts with READY content, only for languages where every part is ready."""
+        """language -> number of parts with READY content. Languages with none are left out.
+
+        Completeness is the caller's business: comparing this against the outline's part count is
+        what `TutorialService.status` does, and it needs the true count to report progress."""
         rows = self._conn.execute(
             "SELECT pc.language, count(*) AS ready FROM part_content pc JOIN parts p ON p.id = pc.part_id"
             " WHERE p.outline_id = %s AND pc.status = 'ready' GROUP BY pc.language",
             (outline_id,),
         ).fetchall()
-        total = self._conn.execute(
-            "SELECT count(*) AS n FROM parts WHERE outline_id = %s", (outline_id,)
-        ).fetchone()["n"]
-        return {r["language"]: int(r["ready"]) for r in rows if int(r["ready"]) == int(total) and total > 0}
+        return {r["language"]: int(r["ready"]) for r in rows}
+
+    def languages_failed(self, outline_id: UUID) -> dict[str, tuple[int, ...]]:
+        """language -> positions of the parts whose content is FAILED, ascending."""
+        rows = self._conn.execute(
+            "SELECT pc.language, p.position FROM part_content pc JOIN parts p ON p.id = pc.part_id"
+            " WHERE p.outline_id = %s AND pc.status = 'failed' ORDER BY pc.language, p.position",
+            (outline_id,),
+        ).fetchall()
+        failed: dict[str, list[int]] = {}
+        for row in rows:
+            failed.setdefault(row["language"], []).append(int(row["position"]))
+        return {language: tuple(positions) for language, positions in failed.items()}
