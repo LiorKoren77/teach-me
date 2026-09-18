@@ -103,3 +103,16 @@ def test_missing_parsed_output_is_parse_error():
 def test_capabilities_include_pdf_and_images():
     caps = AnthropicLLM(client=_StubClient(_message())).capabilities()
     assert {"application/pdf", "image/png", "image/jpeg", "text/plain", "text/markdown"} <= caps.media_types
+
+
+def test_document_part_without_data_raises():
+    request = StructuredRequest(
+        purpose="test",
+        model="claude-opus-5",
+        system="sys",
+        parts=(ContentPart(kind="document", data=None, media_type=None),),
+        max_tokens=4000,
+        effort="low",
+    )
+    with pytest.raises(ValueError, match="document"):
+        AnthropicLLM(client=_StubClient(_message())).generate_structured(request, Answer)
