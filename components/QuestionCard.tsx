@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import type { QuestionView } from "@/lib/api/types";
+import type { AnswerResult, QuestionView } from "@/lib/api/types";
 import type { Strings } from "@/lib/i18n";
 
 const MAX_ANSWER = 1500;
@@ -10,23 +10,28 @@ const MAX_ANSWER = 1500;
 // a prompt to reach the DOM as markup. The answer never leaves this component as HTML either.
 export function QuestionCard({ question, busy, strings, onSubmit }: {
   question: QuestionView; busy: boolean; strings: Strings;
-  onSubmit: (answer: { answer_text?: string; answer_choice?: number }) => Promise<void>;
+  // Resolves with what the API made of the answer, or null when nothing was sent. The card
+  // needs the outcome: a rejected answer is one the student has to rewrite, so it stays put.
+  onSubmit: (answer: { answer_text?: string; answer_choice?: number }) => Promise<AnswerResult | null>;
 }) {
   const [text, setText] = useState("");
   const [choice, setChoice] = useState<number | null>(null);
   const choices = question.kind === "multiple_choice" ? question.choices : null;
   const ready = choices ? choice !== null : text.trim().length > 0;
 
-  // The answer is only thrown away once the API has it: a submit that fails leaves what the
-  // student wrote where it is, to send again. The failure itself is the caller's to report.
+  // The answer is only thrown away once it has been accepted: a submit that fails, and a
+  // rejection the student is asked to rewrite, both leave what they wrote where it is. The
+  // failure itself is the caller's to report.
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     if (busy || !ready) return;
+    let result: AnswerResult | null;
     try {
-      await onSubmit(choices ? { answer_choice: choice as number } : { answer_text: text.trim() });
+      result = await onSubmit(choices ? { answer_choice: choice as number } : { answer_text: text.trim() });
     } catch {
       return;
     }
+    if (!result?.accepted) return;
     setText("");
     setChoice(null);
   }

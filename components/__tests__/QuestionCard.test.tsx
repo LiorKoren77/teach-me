@@ -2,20 +2,23 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { QuestionCard } from "../QuestionCard";
+import type { AnswerResult } from "@/lib/api/types";
 import { t } from "@/lib/i18n";
 
 const base = { attempt_question_id: "aq", question_id: "q", position: 1, round_no: 1, total_in_round: 5 };
+const ACCEPTED: AnswerResult = { accepted: true, grade: "correct", feedback: "Right.", rejection_reason: null, next_question: null, round_result: null };
+const REJECTED: AnswerResult = { ...ACCEPTED, accepted: false, grade: null, feedback: "", rejection_reason: "off_topic" };
 
 describe("QuestionCard", () => {
   it("free text: submits trimmed text and disables while busy", async () => {
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const onSubmit = vi.fn().mockResolvedValue(ACCEPTED);
     render(<QuestionCard question={{ ...base, kind: "free_text", prompt: "Why?", choices: null }} busy={false} strings={t("en")} onSubmit={onSubmit} />);
     await userEvent.type(screen.getByRole("textbox"), "  because  ");
     await userEvent.click(screen.getByRole("button", { name: "Submit answer" }));
     expect(onSubmit).toHaveBeenCalledWith({ answer_text: "because" });
   });
   it("multiple choice: submits the chosen index and renders prompt as plain text", async () => {
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const onSubmit = vi.fn().mockResolvedValue(ACCEPTED);
     render(<QuestionCard question={{ ...base, kind: "multiple_choice", prompt: "<b>Pick</b>", choices: ["a", "b"] }} busy={false} strings={t("en")} onSubmit={onSubmit} />);
     expect(screen.getByText("<b>Pick</b>")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("radio", { name: "b" }));
@@ -32,15 +35,24 @@ describe("QuestionCard", () => {
   });
 
   it("empties the box once the submit has gone through", async () => {
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const onSubmit = vi.fn().mockResolvedValue(ACCEPTED);
     render(<QuestionCard question={{ ...base, kind: "free_text", prompt: "Why?", choices: null }} busy={false} strings={t("en")} onSubmit={onSubmit} />);
     await userEvent.type(screen.getByRole("textbox"), "because it cools");
     await userEvent.click(screen.getByRole("button", { name: "Submit answer" }));
     await waitFor(() => expect(screen.getByRole("textbox")).toHaveValue(""));
   });
 
+  it("keeps a rejected answer in the box for the student to rewrite", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(REJECTED);
+    render(<QuestionCard question={{ ...base, kind: "free_text", prompt: "Why?", choices: null }} busy={false} strings={t("en")} onSubmit={onSubmit} />);
+    await userEvent.type(screen.getByRole("textbox"), "because it cools");
+    await userEvent.click(screen.getByRole("button", { name: "Submit answer" }));
+    expect(onSubmit).toHaveBeenCalledWith({ answer_text: "because it cools" });
+    await waitFor(() => expect(screen.getByRole("textbox")).toHaveValue("because it cools"));
+  });
+
   it("submitting is refused while busy or with an empty answer", () => {
-    render(<QuestionCard question={{ ...base, kind: "free_text", prompt: "Why?", choices: null }} busy={true} strings={t("en")} onSubmit={async () => {}} />);
+    render(<QuestionCard question={{ ...base, kind: "free_text", prompt: "Why?", choices: null }} busy={true} strings={t("en")} onSubmit={async () => ACCEPTED} />);
     expect(screen.getByRole("button", { name: "Submit answer" })).toBeDisabled();
     expect(screen.getByText("Question 2 of 5")).toBeInTheDocument();
   });

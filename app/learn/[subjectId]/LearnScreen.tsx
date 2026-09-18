@@ -80,6 +80,9 @@ export function LearnScreen({ subjectId }: { subjectId: string }) {
               // The stream's own text while it runs, the stored one when a reinforcing part is
               // resumed in a later visit.
               reexplanation={stream.text || session.reexplanation || null}
+              // Only this stream's own text can be known to be cut off; a stored re-explanation
+              // read back on a later visit carries no such mark.
+              truncated={stream.truncated && stream.text !== ""}
             />
             <DialogPane
               session={session}

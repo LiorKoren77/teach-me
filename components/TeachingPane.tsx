@@ -17,9 +17,9 @@ function openFigure(src: string | null) {
   if (src) window.open(src, "_blank", "noopener,noreferrer");
 }
 
-export function TeachingPane({ title, body, keyPoints, figures, strings, reexplanation }: {
+export function TeachingPane({ title, body, keyPoints, figures, strings, reexplanation, truncated }: {
   title: string; body: string; keyPoints: string[]; figures: Figure[]; strings: Strings;
-  reexplanation: string | null;
+  reexplanation: string | null; truncated: boolean;
 }) {
   return (
     <section className="flex flex-col gap-4 rounded-lg border border-stone-200 bg-white p-5">
@@ -29,6 +29,9 @@ export function TeachingPane({ title, body, keyPoints, figures, strings, reexpla
           <div className={PROSE}>
             <Markdown remarkPlugins={[remarkGfm]}>{reexplanation}</Markdown>
           </div>
+          {/* The stream hit the model's token ceiling: the text is kept, and says so rather than
+              leaving the student to wonder why it stops mid-thought. */}
+          {truncated ? <p className="mt-2 text-sm text-amber-900">{strings.truncated}</p> : null}
         </div>
       ) : null}
 

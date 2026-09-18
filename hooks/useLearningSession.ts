@@ -66,11 +66,11 @@ export function useLearningSession(subjectId: string, preferred: Language) {
   // has to know whether the API took it - the answer box, which keeps the student's text when it
   // did not - can await the result. The ones fired from a button say so with `ignore`.
   const run = useCallback(
-    async (work: () => Promise<void>) => {
+    async <T,>(work: () => Promise<T>): Promise<T> => {
       setBusy(true);
       clear();
       try {
-        await work();
+        return await work();
       } catch (failure) {
         fail(failure);
         throw failure;
@@ -123,7 +123,7 @@ export function useLearningSession(subjectId: string, preferred: Language) {
     (answer: { answer_text?: string; answer_choice?: number }) =>
       run(async () => {
         const attemptId = session?.attempt_id;
-        if (!attemptId || !question) return;
+        if (!attemptId || !question) return null;
         const result = await submitAnswer(attemptId, question.attempt_question_id, answer, getToken);
         setLastAnswer(result);
         if (result.round_result) {
@@ -133,9 +133,11 @@ export function useLearningSession(subjectId: string, preferred: Language) {
           setSession((previous) => (previous ? { ...previous, status: finished.status, last_round: finished } : previous));
           setSubject(await openSubject(subjectId, getToken));
         } else {
-          // A rejection hands back the same question, so the box simply reopens.
+          // A rejection hands back the same question, so the box simply reopens - with the
+          // answer still in it, which is why the result goes back to the caller.
           setQuestion(result.next_question);
         }
+        return result;
       }),
     [run, session?.attempt_id, question, subjectId, getToken],
   );

@@ -48,7 +48,8 @@ export function AdminScreen() {
                   >
                     <span className="font-medium">{subject.name}</span>
                     <span className="flex gap-3 text-xs text-stone-600">
-                      <span>{subject.state}</span>
+                      {/* The API sends the enum value; an unknown one is shown as it came. */}
+                      <span>{strings.adminState[subject.state] ?? subject.state}</span>
                       <span>{strings.adminVersion(subject.current_outline_version)}</span>
                     </span>
                   </button>
@@ -66,7 +67,7 @@ export function AdminScreen() {
                     <li key={source.id} className="text-sm text-stone-700">
                       <span className="flex flex-wrap items-baseline justify-between gap-2">
                         <span className="break-words">{source.filename}</span>
-                        <span className="text-xs text-stone-600">{source.status}</span>
+                        <span className="text-xs text-stone-600">{strings.sourceStatus[source.status] ?? source.status}</span>
                       </span>
                       {source.error ? <span className="block text-xs text-red-700">{source.error}</span> : null}
                     </li>

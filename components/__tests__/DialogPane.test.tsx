@@ -4,7 +4,7 @@ import { DialogPane } from "../DialogPane";
 import { t } from "@/lib/i18n";
 import type { AnswerResult, PartSession, PartStatus, QuestionView, RoundResult } from "@/lib/api/types";
 
-const part = { position: 0, title: "Intro", body: "b", key_points: [], sections: [], glossary: [], page_refs: [], page_labels: [] };
+const part = { outline_version: 1, published: true, position: 0, title: "Intro", body: "b", key_points: [], sections: [], glossary: [], page_refs: [], page_labels: [] };
 
 function session(status: PartStatus): PartSession {
   return { part, status, attempt_id: "att", round_no: 1, current_question: null, last_round: null, reexplanation: null };
@@ -22,7 +22,7 @@ const failedRound: RoundResult = {
   round_no: 1, score: 0.4, passed: false, status: "reinforcing", rounds_left: 2, weak_section_titles: ["Evaporation"],
 };
 
-const shared = { busy: false, streaming: false, strings: t("en"), onStartRound: () => {}, onSubmit: async () => {}, onContinue: () => {} };
+const shared = { busy: false, streaming: false, strings: t("en"), onStartRound: () => {}, onSubmit: async () => null, onContinue: () => {} };
 
 describe("DialogPane", () => {
   it("offers the questions while the student is still reading", () => {

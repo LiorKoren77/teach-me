@@ -17,20 +17,22 @@ const CLERK_SECRET_KEY = process.env.CLERK_SECRET_KEY;
 const CLERK_USERNAME = process.env.E2E_CLERK_USER_USERNAME;
 const CLERK_PASSWORD = process.env.E2E_CLERK_USER_PASSWORD;
 
-test.skip(!process.env.CLERK_SECRET_KEY || !process.env.E2E_CLERK_USER_USERNAME, "Clerk test credentials not configured");
+test.skip(
+  !CLERK_SECRET_KEY || !CLERK_USERNAME || !CLERK_PASSWORD,
+  "Clerk test credentials not configured",
+);
 
 // The seeded subject (scripts/e2e-backend.sh) teaches he and en; the app defaults to en with no
 // language cookie set, which is the state a fresh browser context starts in.
 const strings = t("en");
 const SUBJECT_ID_FILE = path.join(__dirname, ".subject-id");
 
-// The fake-stack question and grading responders that ship on the merged branch
-// (api/teachme/generation/fake_responders.py and api/teachme/grading/fake_responders.py on
-// stage-4-frontend; not present in this worktree's stage-3 backend) are deterministic: every
-// free-text question's expected_answer is exactly "Fake expected answer.", and the one
-// multiple-choice question a bank always carries has choices A-D with B correct. Answering
-// exactly that text, or picking "B", makes the fake grader return `correct` and the fake
-// relevance check return `on_topic` no matter which questions a round samples.
+// The fake-stack question and grading responders (api/teachme/generation/fake_responders.py and
+// api/teachme/grading/fake_responders.py) are deterministic: every free-text question's
+// expected_answer is exactly "Fake expected answer.", and the one multiple-choice question a
+// bank always carries has choices A-D with B correct. Answering exactly that text, or picking
+// "B", makes the fake grader return `correct` and the fake relevance check return `on_topic` no
+// matter which questions a round samples.
 const FREE_TEXT_ANSWER = "Fake expected answer.";
 const MULTIPLE_CHOICE_ANSWER = "B";
 const MAX_QUESTIONS_PER_ROUND = 30; // a seatbelt against a stuck loop, not a tuned round size.
