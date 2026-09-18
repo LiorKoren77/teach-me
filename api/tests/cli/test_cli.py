@@ -65,6 +65,21 @@ def test_ingest_export_usage_flow(cli):
     assert "ready" in result.output
 
 
+def test_reingest_asks_before_changing_the_source(cli):
+    app, pdf, tmp_path = cli
+    result = runner.invoke(app, ["ingest", "--subject", "Geo", "--yes", str(pdf)])
+    assert result.exit_code == 0, result.output
+
+    result = runner.invoke(app, ["source", "list", "--subject", "Geo"])
+    source_id = result.output.split()[0]
+
+    result = runner.invoke(app, ["source", "reingest", source_id], input="n\n")
+    assert result.exit_code == 1
+
+    result = runner.invoke(app, ["source", "list", "--subject", "Geo"])
+    assert ": ready" in result.output
+
+
 def test_ingest_rejects_unknown_type(cli):
     app, pdf, tmp_path = cli
     bad = tmp_path / "x.zip"

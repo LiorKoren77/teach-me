@@ -137,13 +137,14 @@ def source_reingest(source_id: UUID, yes: bool = typer.Option(False, "--yes", "-
     """Re-run the whole pipeline for one source (after fixing the file or the prompts)."""
     c = build_container()
     c.check_ready()
-    source = c.source_service.mark_for_reingest(source_id)
+    source = c.sources.get(source_id)
     estimate = estimate_ingest(
         page_count=source.page_count or 1, model=c.settings.model_read_pages, prices=c.prices
     )
     typer.echo(f"Estimate: {estimate.describe()}")
     if not yes:
         typer.confirm("Proceed?", abort=True)
+    source = c.source_service.mark_for_reingest(source_id)
     c.job_runner.enqueue("ingest_source", {"source_id": str(source.id)})
     typer.echo(_describe(c.sources.get(source.id)))
     c.close()
