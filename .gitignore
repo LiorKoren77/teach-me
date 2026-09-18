@@ -52,3 +52,12 @@ sources/
 digest/
 data/
 *.egg-info/
+
+# e2e: the backend script's scratch subject/files/digest, and the id it hands the spec
+/.e2e/
+e2e/.subject-id
+
+# playwright
+/test-results/
+/playwright-report/
+/blob-report/

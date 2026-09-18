@@ -39,6 +39,97 @@ not it has been published, instead of the published one. The subject digest bund
 under `digest/<subject slug>/v<outline version>/`: `outline.json`, `glossary.json`,
 `glossary.<lang>.json`, `parts/NN.<lang>.md`, `questions.<lang>.jsonl`.
 
+## Frontend
+
+```bash
+source ~/.nvm/nvm.sh && nvm use 22   # the version in .nvmrc
+npm install
+npm run dev                          # with the API on :8000, see "Running the API locally"
+npm run lint && npm run test && npm run build
+```
+
+Environment (in `.env.local`, never committed; placeholders live in `.env.example`):
+
+- `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` - Clerk publishable key. Public by design, but the app
+  will not sign anyone in without it. With no key at all `next build` still succeeds, because
+  the root layout reads the language cookie and every route is therefore rendered on demand.
+- `CLERK_SECRET_KEY` - Clerk secret key, used by the proxy to verify sessions.
+- `NEXT_PUBLIC_CLERK_SIGN_IN_URL` / `..._SIGN_UP_URL` and the matching
+  `..._FALLBACK_REDIRECT_URL`s - optional, commented out in `.env.example`: unset, Clerk uses its
+  hosted pages, which is what this app does.
+- `BACKEND_URL` - optional; where `next dev` sends `/api/*`, default `http://localhost:8000`.
+  `next.config.ts` adds that rewrite unless `VERCEL` is set, since on Vercel the Python
+  function serves `/api` itself.
+
+The backend needs `CLERK_JWKS_URL` for the same Clerk instance (see "Authentication"); the
+frontend only ever calls relative `/api/...` URLs and attaches the session token as a bearer.
+
+Conventions: components take plain props and never fetch; all fetching lives in `lib/api/*.ts`
+and `hooks/*.ts`; every UI string comes from `lib/i18n.ts` (he, en, pt) and the root layout sets
+`<html lang dir>` from the `teachme_lang` cookie, so Hebrew renders right-to-left. Tests are
+Vitest plus Testing Library (`npm run test`), one Playwright flow (`npm run e2e`).
+
+### End-to-end tests
+
+`npm run e2e` runs `playwright.config.ts`: chromium only, `e2e/learn.spec.ts` signs in, opens a
+seeded subject, reads part 1 and answers a full round. Two `webServer` entries own the process
+lifecycle - `scripts/e2e-backend.sh` (the API on the fake stack against the local Postgres *test*
+database) and `npm run dev` (the frontend) - both left alone (`reuseExistingServer`) if already
+running outside CI.
+
+One-time setup:
+
+- `npx playwright install chromium` - downloads a browser binary from Microsoft's and Google's
+  CDNs; it needs outbound access to those hosts specifically (a sandbox that only allows the npm
+  registry, for instance, cannot reach them). Without it `npm run e2e` fails to launch the
+  browser rather than skipping.
+- `npm install --save-dev @clerk/testing` - Clerk's own Playwright helpers
+  (`clerkSetup`/`setupClerkTestingToken`), which get a Testing Token so the sign-in form is not
+  blocked by bot protection in a headless browser. Not a committed dependency: the spec imports
+  it dynamically, only once Clerk credentials are configured (see below), so `npm run e2e`
+  without them never needs it installed.
+- Clerk test credentials: a real test user in the same Clerk instance the app is using, plus
+  `CLERK_SECRET_KEY` (already needed for the app itself), `E2E_CLERK_USER_USERNAME` and
+  `E2E_CLERK_USER_PASSWORD` in the environment `npm run e2e` runs in. Without all three the spec
+  reports itself **skipped** (`test.skip`), not failed - this is the expected result in an
+  environment with no Clerk keys at all.
+- `scripts/e2e-backend.sh` reuses the Python venv `api/` is installed into (see "Running the API
+  locally"); set `TEACHME_VENV` if it is not at the default sibling-checkout path. It seeds one
+  small subject (a two-page generated PDF, ingested/generated/published on `LLM_PROVIDER=fake
+  EMBEDDINGS_PROVIDER=fake RERANKER_PROVIDER=noop`) into `DATABASE_URL`'s `teachme_test`
+  database, idempotently - safe to run on its own via `npm run e2e:seed` to check the seed step
+  without starting the server.
+
+`proxy.ts` (Next 16's replacement for `middleware.ts`) runs `clerkMiddleware()` and makes an
+optimistic check on `/learn` and `/admin`. Clerk Core 3 deprecated route-matcher protection
+because path matching can diverge from routing, so each protected page also checks for itself.
+
+`/learn/[subjectId]` is that kind of page: a server component that calls `await auth.protect()`
+before rendering the client screen - subject tabs and the part strip on top, the teaching text
+above the tutor dialog, the sources on the right, stacked on narrow screens. Two contracts in it
+are worth naming. Page references come from the part: `page_refs` on the rendered part holds the
+global 0-based page indices to show thumbnails for, and `lib/pageRefs.ts` falls back to scanning
+the body for "page N", "עמוד N" and "página N" for a part rendered before that field existed. The thumbnail images come from `/api/subjects/{id}/pages/{n}/image`,
+which accepts a bearer token only - an `<img src>` cannot send one, so `hooks/usePageImage.ts`
+fetches each page through the API client and hands the browser an object URL instead. And
+the re-explanation shows its notice for as long as the stream is open, because the API generates
+the whole re-explanation before it sends a byte (see "Re-explanation stream"); the next round
+stays disabled until the `done` event arrives, and the text stays on screen through that round,
+since it is keyed on the failed round rather than on the round result the screen is holding.
+
+The dialog shows the feedback for the answer just graded together with the next question, rather
+than one after the other as the spec's wording suggests: the API answers a submit with both, and
+holding the question back would cost a round trip and a second wait for nothing.
+
+The Admin link is offered only to a reader whose session token carries the admin role
+(`lib/role.ts` reads the same `role` claim the API verifies); the page and every route behind it
+check for themselves regardless.
+
+Failed requests are shown, not printed: `lib/api/errors.ts` maps an `ApiError` status (401, 403,
+409, 429, anything else) to a key in the `errors` block of `lib/i18n.ts`, `hooks/useApiError.ts`
+sends the backend's `detail` to `console.debug`, and a 401 goes to Clerk's `redirectToSignIn()`
+rather than to a message the reader can do nothing with.
+
 ## API
 
 ### Running the API locally
