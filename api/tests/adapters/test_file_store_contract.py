@@ -66,3 +66,15 @@ def test_list_keys_by_prefix_sorted(store):
     store.put("q/1.md", b"1", "text/markdown")
     assert store.list_keys("p/") == ["p/1.md", "p/2.md"]
     assert store.list_keys("zzz/") == []
+
+
+@pytest.mark.parametrize("key", ["../escape.txt", "a/../../escape.txt", "/etc/passwd"])
+def test_local_store_rejects_escaping_key(tmp_path, key):
+    store = LocalFileStore(tmp_path / "files")
+    with pytest.raises(ValueError):
+        store.put(key, b"x", "text/plain")
+
+
+def test_vercel_blob_requires_a_prefix():
+    with pytest.raises(ValueError):
+        VercelBlobFileStore(prefix="  ", client=object())

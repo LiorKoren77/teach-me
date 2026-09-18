@@ -12,7 +12,9 @@ class VercelBlobFileStore:
     name = "vercel_blob"
 
     def __init__(self, prefix: str, token: str | None = None, client: BlobClient | None = None) -> None:
-        self._prefix = prefix.strip("/")
+        self._prefix = prefix.strip().strip("/")
+        if not self._prefix:
+            raise ValueError("VercelBlobFileStore requires a non-empty prefix")
         self._client = client or BlobClient(token=token)
 
     def _path(self, key: str) -> str:
