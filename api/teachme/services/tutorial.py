@@ -17,6 +17,7 @@ from teachme.domain.models import (
     Question,
     Section,
     SectionContent,
+    Source,
     SourceStatus,
     Subject,
     SubjectState,
@@ -101,6 +102,10 @@ class RenderedPart(BaseModel):
     key_points: tuple[str, ...]
     # Global corpus page indices the body points at, for GET /api/subjects/{id}/pages/{i}/image.
     page_refs: tuple[int, ...]
+    # What the book prints on each of those pages, parallel to page_refs - "" for a page that
+    # carries no printed number. A corpus index is an internal address; this is what a reader
+    # sees on the page, and the only page number worth showing them.
+    page_labels: tuple[str, ...]
     sections: list[SectionContent]
     glossary: list[GlossaryEntry]
 
@@ -532,8 +537,9 @@ class TutorialService:
             raise SubjectNotReady(f"part {part_position} has no ready content in {language!r}")
         terms = self._glossary.terms(outline.id)
         translations = {t.term_id: t.term for t in self._glossary.translations(outline.id, language)}
+        sources = self._sources.list_by_subject(subject.id)
         view = GlossaryView(
-            source_language=self._corpus_language(subject),
+            source_language=dominant_language(sources),
             source_terms={t.slug: t.source_term for t in terms},
         )
         body = render_placeholders(
@@ -549,6 +555,7 @@ class TutorialService:
             body=body,
             key_points=content.key_points,
             page_refs=content.page_refs,
+            page_labels=self._page_labels(sources, content.page_refs),
             sections=self._content.sections(part.id, language),
             glossary=[
                 GlossaryEntry(
@@ -561,5 +568,11 @@ class TutorialService:
             ],
         )
 
-    def _corpus_language(self, subject: Subject) -> str | None:
-        return dominant_language(self._sources.list_by_subject(subject.id))
+    def _page_labels(self, sources: Sequence[Source], page_refs: Sequence[int]) -> tuple[str, ...]:
+        """The printed number of each referenced page, or "" where the page carries none. The
+        indices are global corpus indices, so the ready sources' pages are laid end to end in
+        source order - the same order build_corpus numbers them in."""
+        ready = [s for s in sources if s.status == SourceStatus.READY]
+        by_source = self._pages.printed_numbers([s.id for s in ready])
+        printed = [number for source in ready for number in by_source.get(source.id, ())]
+        return tuple(printed[index] if 0 <= index < len(printed) else "" for index in page_refs)

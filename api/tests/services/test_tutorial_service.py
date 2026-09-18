@@ -150,6 +150,35 @@ def test_rendered_part_carries_the_page_refs_the_teaching_text_points_at(contain
     assert rendered.page_refs == (part.page_start,)
 
 
+def test_rendered_part_labels_every_page_ref_with_its_printed_number(container):
+    subject = _ingested_subject(container)
+    source = container.sources.list_by_subject(subject.id)[0]
+    # A scanned book: the first page is an unnumbered cover, the rest carry printed numbers that
+    # do not line up with the corpus indices at all - which is exactly why the label is needed.
+    stored = container.pages.list(source.id)
+    container.pages.replace(
+        source.id,
+        [
+            page.model_copy(update={"printed_number": None if i == 0 else str(11 + i)})
+            for i, page in enumerate(stored)
+        ],
+    )
+    container.conn.commit()
+    container.tutorial_service.generate(subject)
+
+    outline = container.outlines.latest(subject.id)
+    seen: list[str] = []
+    for part in container.outlines.parts(outline.id):
+        rendered = container.tutorial_service.rendered_part(subject, "he", part_position=part.position)
+        assert rendered.page_refs  # the fake generator points at the part's first page
+        assert rendered.page_labels == tuple(
+            "" if index == 0 else str(11 + index) for index in rendered.page_refs
+        )
+        seen.extend(rendered.page_labels)
+    assert "" in seen  # the cover: a page without a printed number is labelled with nothing
+    assert any(label for label in seen)
+
+
 def test_a_failed_part_is_reported_and_leaves_nothing_behind(container):
     subject = _ingested_subject(container)
 

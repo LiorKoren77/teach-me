@@ -7,8 +7,11 @@ import type { Strings } from "@/lib/i18n";
 // text (answers) is plain text and goes to QuestionCard/FeedbackCard instead.
 const PROSE = "prose prose-stone max-w-none text-stone-900 [&_h1]:text-xl [&_h2]:text-lg [&_ul]:list-disc [&_ul]:ps-6 [&_ol]:list-decimal [&_ol]:ps-6 [&_p]:my-3 [&_table]:border-collapse [&_td]:border [&_th]:border [&_td]:px-2 [&_th]:px-2";
 
-/** One source page: the index it refers to and its image once the hook has fetched it. */
-export type Figure = { page: number; src: string | null };
+/**
+ * One source page: the global index it refers to (what the image route takes), the number the
+ * page itself prints ("" when it prints none) and its image once the hook has fetched it.
+ */
+export type Figure = { page: number; label: string; src: string | null };
 
 function openFigure(src: string | null) {
   if (src) window.open(src, "_blank", "noopener,noreferrer");
@@ -48,8 +51,15 @@ export function TeachingPane({ title, body, keyPoints, figures, strings, reexpla
 
       {figures.length === 0 ? null : (
         <div className="flex gap-3 overflow-x-auto pb-1">
-          {figures.map(({ page, src }) => (
-            <FigureThumbnail key={page} src={src} label={strings.figurePage(page)} onOpen={() => openFigure(src)} />
+          {figures.map(({ page, label, src }) => (
+            <FigureThumbnail
+              key={page}
+              src={src}
+              // A corpus index means nothing to a reader, so an unnumbered page says only that
+              // it is a figure rather than naming a page the book does not have.
+              label={label ? strings.figurePage(label) : strings.figure}
+              onOpen={() => openFigure(src)}
+            />
           ))}
         </div>
       )}

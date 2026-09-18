@@ -15,7 +15,6 @@ import { usePageImages } from "@/hooks/usePageImage";
 import { useReexplainStream } from "@/hooks/useReexplainStream";
 import { useSources, useSubjects } from "@/hooks/useSubjects";
 import { directionOf, t } from "@/lib/i18n";
-import { pageRefsOf } from "@/lib/pageRefs";
 
 // The screen from the spec: subject tabs and the part strip on top, the teaching text above the
 // tutor dialog in the main column, the sources on the right, stacked on narrow screens. It holds
@@ -34,9 +33,14 @@ export function LearnScreen({ subjectId }: { subjectId: string }) {
   // re-explanation is still the one to read once "Start the next round" has cleared that.
   const stream = useReexplainStream(attemptId, session?.last_round?.round_no ?? null, reinforcing && attemptId !== null);
   const part = session?.part;
-  const pageRefs = useMemo(() => pageRefsOf(part), [part]);
+  const pageRefs = useMemo(() => part?.page_refs ?? [], [part]);
   const pageUrls = usePageImages(subjectId, pageRefs);
-  const figures = useMemo(() => pageRefs.map((page) => ({ page, src: pageUrls[page] ?? null })), [pageRefs, pageUrls]);
+  // page_labels runs parallel to page_refs: the number printed on each of those pages, which is
+  // what the thumbnail is captioned with - the index is only the API's address for the image.
+  const figures = useMemo(
+    () => pageRefs.map((page, i) => ({ page, label: part?.page_labels[i] ?? "", src: pageUrls[page] ?? null })),
+    [pageRefs, part, pageUrls],
+  );
 
   return (
     <div dir={directionOf(language)} className="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-6 p-6">

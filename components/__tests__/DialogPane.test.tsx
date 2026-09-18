@@ -4,7 +4,7 @@ import { DialogPane } from "../DialogPane";
 import { t } from "@/lib/i18n";
 import type { AnswerResult, PartSession, PartStatus, QuestionView, RoundResult } from "@/lib/api/types";
 
-const part = { position: 0, title: "Intro", body: "b", key_points: [], sections: [], glossary: [] };
+const part = { position: 0, title: "Intro", body: "b", key_points: [], sections: [], glossary: [], page_refs: [], page_labels: [] };
 
 function session(status: PartStatus): PartSession {
   return { part, status, attempt_id: "att", round_no: 1, current_question: null, last_round: null, reexplanation: null };

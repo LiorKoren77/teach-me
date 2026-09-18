@@ -108,8 +108,8 @@ because path matching can diverge from routing, so each protected page also chec
 before rendering the client screen - subject tabs and the part strip on top, the teaching text
 above the tutor dialog, the sources on the right, stacked on narrow screens. Two contracts in it
 are worth naming. Page references come from the part: `page_refs` on the rendered part holds the
-global 0-based page indices to show thumbnails for, and `lib/pageRefs.ts` falls back to scanning
-the body for "page N", "עמוד N" and "página N" for a part rendered before that field existed. The thumbnail images come from `/api/subjects/{id}/pages/{n}/image`,
+global 0-based page indices to show thumbnails for, and `page_labels` the number each of those
+pages prints, which is what the thumbnail is captioned with. The thumbnail images come from `/api/subjects/{id}/pages/{n}/image`,
 which accepts a bearer token only - an `<img src>` cannot send one, so `hooks/usePageImage.ts`
 fetches each page through the API client and hands the browser an object URL instead. And
 the re-explanation shows its notice for as long as the stream is open, because the API generates

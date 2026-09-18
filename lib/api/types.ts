@@ -13,9 +13,10 @@ export interface PartView { part_id: string; position: number; title: string; st
 export interface SubjectView { subject_id: string; name: string; languages: Language[]; parts: PartView[]; }
 export interface SectionContent { section_id: string; language: string; title: string; summary: string; }
 export interface GlossaryEntry { slug: string; term: string; source_term: string; definition: string; }
-// `page_refs` holds global 0-based page indices and is optional only while the backend is still
-// growing it; `lib/pageRefs.ts` falls back to scanning the body for a part rendered without it.
-export interface RenderedPart { position: number; title: string; body: string; key_points: string[]; sections: SectionContent[]; glossary: GlossaryEntry[]; page_refs?: number[]; }
+// `page_refs` holds global 0-based page indices - what the page-image route takes - and
+// `page_labels` the number each of those pages prints, in the same order ("" for a page that
+// prints none).
+export interface RenderedPart { position: number; title: string; body: string; key_points: string[]; sections: SectionContent[]; glossary: GlossaryEntry[]; page_refs: number[]; page_labels: string[]; }
 export interface QuestionView { attempt_question_id: string; question_id: string; position: number; round_no: number; total_in_round: number; kind: QuestionKind; prompt: string; choices: string[] | null; }
 export interface RoundResult { round_no: number; score: number; passed: boolean; status: PartStatus; rounds_left: number; weak_section_titles: string[]; }
 export interface AnswerResult { accepted: boolean; grade: Grade | null; feedback: string; rejection_reason: string | null; next_question: QuestionView | null; round_result: RoundResult | null; }
