@@ -29,3 +29,17 @@ def test_db_fixture_truncates_leftovers_before_yielding(migrated_database):
             next(generator)
         except StopIteration:
             pass
+
+
+def test_connect_can_open_an_autocommit_connection(migrated_database):
+    """Telemetry writes on their own connection so they survive a rolled-back pipeline step."""
+    conn = connect(migrated_database, autocommit=True)
+    try:
+        assert conn.autocommit is True
+    finally:
+        conn.close()
+    plain = connect(migrated_database)
+    try:
+        assert plain.autocommit is False
+    finally:
+        plain.close()
