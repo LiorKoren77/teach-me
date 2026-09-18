@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from uuid import uuid4
 
 from teachme.domain.models import Figure, Page
@@ -98,3 +99,13 @@ def test_usage_insert_and_summarize(db):
     assert by_purpose["ingest.read_pages"]["input_tokens"] == 400
     assert float(by_purpose["ingest.read_pages"]["cost_usd"]) == 0.002
     assert by_purpose["ingest.embed"]["model"] == "voyage-4"
+
+    json.dumps(summary)
+    for row in summary:
+        assert isinstance(row["cost_usd"], float)
+        assert isinstance(row["calls"], int)
+        assert isinstance(row["input_tokens"], int)
+        assert isinstance(row["output_tokens"], int)
+        assert isinstance(row["cache_read_tokens"], int)
+        assert isinstance(row["cache_write_tokens"], int)
+        assert isinstance(row["avg_latency_ms"], int)

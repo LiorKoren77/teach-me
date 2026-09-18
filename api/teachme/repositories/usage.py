@@ -54,8 +54,8 @@ class UsageRepository:
 
     def summarize(self, *, subject_id: UUID | None = None) -> list[dict[str, Any]]:
         """Calls, tokens and cost grouped by purpose and model, optionally for one subject."""
-        where = "WHERE subject_id = %s" if subject_id else ""
-        params = (subject_id,) if subject_id else ()
+        where = "WHERE subject_id = %s" if subject_id is not None else ""
+        params = (subject_id,) if subject_id is not None else ()
         rows = self._conn.execute(
             "SELECT purpose, model, count(*) AS calls,"
             " sum(input_tokens) AS input_tokens, sum(output_tokens) AS output_tokens,"
@@ -64,4 +64,17 @@ class UsageRepository:
             f" FROM llm_usage {where} GROUP BY purpose, model ORDER BY purpose, model",
             params,
         ).fetchall()
-        return [dict(row) for row in rows]
+        return [
+            {
+                "purpose": row["purpose"],
+                "model": row["model"],
+                "calls": int(row["calls"]),
+                "input_tokens": int(row["input_tokens"]),
+                "output_tokens": int(row["output_tokens"]),
+                "cache_read_tokens": int(row["cache_read_tokens"]),
+                "cache_write_tokens": int(row["cache_write_tokens"]),
+                "cost_usd": float(row["cost_usd"]),
+                "avg_latency_ms": int(row["avg_latency_ms"]) if row["avg_latency_ms"] is not None else 0,
+            }
+            for row in rows
+        ]
