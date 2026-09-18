@@ -11,13 +11,16 @@ from teachme.domain.models import Chunk, ChunkRecord, SubjectState
 from teachme.ingestion.bundle import BundleReader, bundle_slug
 from teachme.ingestion.errors import SubjectLocked
 from teachme.repositories.usage import UsageRepository
+from teachme.telemetry.recording import RecordingEmbedder
 from tests.helpers import make_pdf
 
 
 def _container(make_container, embed_model="fake-embed"):
     container = make_container(pages_per_read_batch=2, pages_per_chunk_batch=2)
     if embed_model != "fake-embed":
-        container.__dict__["embedder"] = FakeEmbedder(model=embed_model)
+        container.__dict__["embedder"] = RecordingEmbedder(
+            FakeEmbedder(model=embed_model), container.usage_recorder
+        )
     return container
 
 
@@ -143,6 +146,19 @@ def test_import_rolls_back_and_skips_bundle_mirror_on_failure(db, make_container
     assert container.sources.list_by_subject(target.id) == []
     subject_slug = bundle_slug(target.name, target.id)
     assert not (tmp_path / "digest" / subject_slug).exists()
+
+
+def test_swapped_embedder_still_records_usage(db, make_container, tmp_path):
+    container = _container(make_container)
+    subject, source = _ingested(container)
+    out = container.export_import.export_source(source.id, tmp_path / "export")
+    container.close()
+
+    other = _container(make_container, embed_model="fake-embed-v2")
+    before = _embed_calls(other)
+    target = other.subject_service.get_or_create("Geo v2")
+    other.export_import.import_source(target, out)
+    assert _embed_calls(other) > before
 
 
 def test_import_reembeds_when_model_differs(db, make_container, tmp_path):
