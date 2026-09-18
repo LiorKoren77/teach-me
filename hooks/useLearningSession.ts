@@ -4,10 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { beginRound, startPart, submitAnswer } from "@/lib/api/learning";
 import { openSubject } from "@/lib/api/subjects";
 import type { AnswerResult, Language, PartSession, QuestionView, RoundResult, SubjectView } from "@/lib/api/types";
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
+import { useApiError } from "./useApiError";
 
 /** The part to land on: the first one still to pass, else the last one the student can reach. */
 function landingPosition(view: SubjectView): number {
@@ -36,7 +33,7 @@ export function useLearningSession(subjectId: string, preferred: Language) {
   const [lastAnswer, setLastAnswer] = useState<AnswerResult | null>(null);
   const [roundResult, setRoundResult] = useState<RoundResult | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { error, fail, clear } = useApiError();
 
   const loadPart = useCallback(
     async (view: SubjectView, position: number) => {
@@ -62,17 +59,20 @@ export function useLearningSession(subjectId: string, preferred: Language) {
     [getToken],
   );
 
-  const run = useCallback(async (work: () => Promise<void>) => {
-    setBusy(true);
-    setError(null);
-    try {
-      await work();
-    } catch (failure) {
-      setError(messageOf(failure));
-    } finally {
-      setBusy(false);
-    }
-  }, []);
+  const run = useCallback(
+    async (work: () => Promise<void>) => {
+      setBusy(true);
+      clear();
+      try {
+        await work();
+      } catch (failure) {
+        fail(failure);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [clear, fail],
+  );
 
   // First load: the subject view, then the part the student is up to. Nothing is set before the
   // first await, so this never writes state during the effect itself.
@@ -86,13 +86,13 @@ export function useLearningSession(subjectId: string, preferred: Language) {
         setSubject(view);
         await loadPart(view, landingPosition(view));
       } catch (failure) {
-        if (!cancelled) setError(messageOf(failure));
+        if (!cancelled) fail(failure);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [isSignedIn, subjectId, getToken, loadPart]);
+  }, [isSignedIn, subjectId, getToken, loadPart, fail]);
 
   const open = useCallback(
     (position: number) =>

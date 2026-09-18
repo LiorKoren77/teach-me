@@ -42,7 +42,7 @@ export default function Home() {
       ) : (
         <main className="flex flex-col gap-4">
           <h2 className="text-lg font-medium">{strings.subjects}</h2>
-          {error ? <p className="text-sm text-red-700">{error}</p> : null}
+          {error ? <p className="text-sm text-red-700">{strings.errors[error]}</p> : null}
           {subjects === null ? null : subjects.length === 0 ? (
             <p className="text-sm text-stone-600">{strings.noSubjects}</p>
           ) : (

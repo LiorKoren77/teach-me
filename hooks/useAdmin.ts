@@ -4,10 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { adminSources, adminSubjects, adminUsage } from "@/lib/api/admin";
 import { ApiError } from "@/lib/api/client";
 import type { AdminSource, AdminSubject, UsageRow } from "@/lib/api/types";
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
+import { useApiError } from "./useApiError";
 
 /**
  * Read-only admin data: every subject, then the selected subject's sources and usage. The
@@ -22,12 +19,15 @@ export function useAdmin() {
   const [sources, setSources] = useState<AdminSource[] | null>(null);
   const [usage, setUsage] = useState<UsageRow[] | null>(null);
   const [forbidden, setForbidden] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { error, fail: report } = useApiError();
 
-  const fail = useCallback((failure: unknown) => {
-    if (failure instanceof ApiError && failure.status === 403) setForbidden(true);
-    else setError(messageOf(failure));
-  }, []);
+  const fail = useCallback(
+    (failure: unknown) => {
+      if (failure instanceof ApiError && failure.status === 403) setForbidden(true);
+      else report(failure);
+    },
+    [report],
+  );
 
   useEffect(() => {
     if (!isSignedIn) return;

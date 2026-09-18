@@ -31,7 +31,7 @@ export function AdminScreen() {
         <p className="text-sm text-stone-700">{strings.adminRoleRequired}</p>
       ) : (
         <>
-          {error ? <p className="text-sm text-red-700">{error}</p> : null}
+          {error ? <p className="text-sm text-red-700">{strings.errors[error]}</p> : null}
 
           <section className="rounded-lg border border-stone-200 bg-white p-4">
             <h2 className="text-sm font-medium text-stone-900">{strings.adminSubjects}</h2>

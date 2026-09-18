@@ -77,9 +77,15 @@ global 0-based page indices to show thumbnails for, and `lib/pageRefs.ts` falls 
 the body for "page N", "עמוד N" and "página N" for a part rendered before that field existed. The thumbnail images come from `/api/subjects/{id}/pages/{n}/image`,
 which accepts a bearer token only - an `<img src>` cannot send one, so `hooks/usePageImage.ts`
 fetches each page through the API client and hands the browser an object URL instead. And
-the re-explanation shows a waiting notice until its first event, because the API generates the
-whole re-explanation before it sends a byte (see "Re-explanation stream"); the next round stays
-disabled until the `done` event arrives.
+the re-explanation shows its notice for as long as the stream is open, because the API generates
+the whole re-explanation before it sends a byte (see "Re-explanation stream"); the next round
+stays disabled until the `done` event arrives, and the text stays on screen through that round,
+since it is keyed on the failed round rather than on the round result the screen is holding.
+
+Failed requests are shown, not printed: `lib/api/errors.ts` maps an `ApiError` status (401, 403,
+409, 429, anything else) to a key in the `errors` block of `lib/i18n.ts`, `hooks/useApiError.ts`
+sends the backend's `detail` to `console.debug`, and a 401 goes to Clerk's `redirectToSignIn()`
+rather than to a message the reader can do nothing with.
 
 ## API
 

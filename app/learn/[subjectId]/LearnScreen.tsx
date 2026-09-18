@@ -30,7 +30,9 @@ export function LearnScreen({ subjectId }: { subjectId: string }) {
   const strings = t(language);
   const attemptId = session?.attempt_id ?? null;
   const reinforcing = roundResult?.status === "reinforcing";
-  const stream = useReexplainStream(attemptId, roundResult?.round_no ?? null, reinforcing && attemptId !== null);
+  // Keyed on the failed round the session remembers, not on the transient round result: the
+  // re-explanation is still the one to read once "Start the next round" has cleared that.
+  const stream = useReexplainStream(attemptId, session?.last_round?.round_no ?? null, reinforcing && attemptId !== null);
   const part = session?.part;
   const pageRefs = useMemo(() => pageRefsOf(part), [part]);
   const pageUrls = usePageImages(subjectId, pageRefs);
@@ -59,8 +61,8 @@ export function LearnScreen({ subjectId }: { subjectId: string }) {
         ) : null}
       </header>
 
-      {error ? <p className="text-sm text-red-700">{error}</p> : null}
-      {stream.error ? <p className="text-sm text-red-700">{stream.error}</p> : null}
+      {error ? <p className="text-sm text-red-700">{strings.errors[error]}</p> : null}
+      {stream.error ? <p className="text-sm text-red-700">{strings.errors[stream.error]}</p> : null}
 
       {session ? (
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_280px]">
