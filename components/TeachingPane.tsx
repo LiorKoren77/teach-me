@@ -7,8 +7,15 @@ import type { Strings } from "@/lib/i18n";
 // text (answers) is plain text and goes to QuestionCard/FeedbackCard instead.
 const PROSE = "prose prose-stone max-w-none text-stone-900 [&_h1]:text-xl [&_h2]:text-lg [&_ul]:list-disc [&_ul]:ps-6 [&_ol]:list-decimal [&_ol]:ps-6 [&_p]:my-3 [&_table]:border-collapse [&_td]:border [&_th]:border [&_td]:px-2 [&_th]:px-2";
 
-export function TeachingPane({ title, body, keyPoints, pageRefs, subjectId, strings, reexplanation }: {
-  title: string; body: string; keyPoints: string[]; pageRefs: number[]; subjectId: string; strings: Strings;
+/** One source page: the index it refers to and its image once the hook has fetched it. */
+export type Figure = { page: number; src: string | null };
+
+function openFigure(src: string | null) {
+  if (src) window.open(src, "_blank", "noopener,noreferrer");
+}
+
+export function TeachingPane({ title, body, keyPoints, figures, strings, reexplanation }: {
+  title: string; body: string; keyPoints: string[]; figures: Figure[]; strings: Strings;
   reexplanation: string | null;
 }) {
   return (
@@ -38,10 +45,10 @@ export function TeachingPane({ title, body, keyPoints, pageRefs, subjectId, stri
         </div>
       )}
 
-      {pageRefs.length === 0 ? null : (
+      {figures.length === 0 ? null : (
         <div className="flex gap-3 overflow-x-auto pb-1">
-          {pageRefs.map((page) => (
-            <FigureThumbnail key={page} subjectId={subjectId} pageIndex={page} label={strings.figurePage(page)} />
+          {figures.map(({ page, src }) => (
+            <FigureThumbnail key={page} src={src} label={strings.figurePage(page)} onOpen={() => openFigure(src)} />
           ))}
         </div>
       )}

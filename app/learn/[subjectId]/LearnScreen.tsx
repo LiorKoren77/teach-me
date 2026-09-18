@@ -11,6 +11,7 @@ import { SubjectTabs } from "@/components/SubjectTabs";
 import { TeachingPane } from "@/components/TeachingPane";
 import { useLanguage } from "@/hooks/useLanguage";
 import { useLearningSession } from "@/hooks/useLearningSession";
+import { usePageImages } from "@/hooks/usePageImage";
 import { useReexplainStream } from "@/hooks/useReexplainStream";
 import { useSources, useSubjects } from "@/hooks/useSubjects";
 import { directionOf, t } from "@/lib/i18n";
@@ -32,6 +33,8 @@ export function LearnScreen({ subjectId }: { subjectId: string }) {
   const stream = useReexplainStream(attemptId, roundResult?.round_no ?? null, reinforcing && attemptId !== null);
   const body = session?.part.body ?? "";
   const pageRefs = useMemo(() => extractPageRefs(body), [body]);
+  const pageUrls = usePageImages(subjectId, pageRefs);
+  const figures = useMemo(() => pageRefs.map((page) => ({ page, src: pageUrls[page] ?? null })), [pageRefs, pageUrls]);
 
   return (
     <div dir={directionOf(language)} className="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-6 p-6">
@@ -66,8 +69,7 @@ export function LearnScreen({ subjectId }: { subjectId: string }) {
               title={session.part.title}
               body={session.part.body}
               keyPoints={session.part.key_points}
-              pageRefs={pageRefs}
-              subjectId={subjectId}
+              figures={figures}
               strings={strings}
               // The stream's own text while it runs, the stored one when a reinforcing part is
               // resumed in a later visit.

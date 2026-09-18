@@ -6,7 +6,8 @@ export class ApiError extends Error {
 
 export type TokenGetter = () => Promise<string | null>;
 
-export async function apiFetch<T>(path: string, getToken: TokenGetter, init: RequestInit = {}): Promise<T> {
+/** One request with the session token attached; a non-2xx answer becomes an ApiError. */
+async function send(path: string, getToken: TokenGetter, init: RequestInit): Promise<Response> {
   const token = await getToken();
   const headers = new Headers(init.headers);
   if (token) headers.set("Authorization", `Bearer ${token}`);
@@ -22,5 +23,16 @@ export async function apiFetch<T>(path: string, getToken: TokenGetter, init: Req
     }
     throw new ApiError(response.status, detail);
   }
+  return response;
+}
+
+export async function apiFetch<T>(path: string, getToken: TokenGetter, init: RequestInit = {}): Promise<T> {
+  const response = await send(path, getToken, init);
   return (await response.json()) as T;
+}
+
+/** For endpoints that answer with bytes rather than JSON, such as a rendered page image. */
+export async function apiFetchBlob(path: string, getToken: TokenGetter, init: RequestInit = {}): Promise<Blob> {
+  const response = await send(path, getToken, init);
+  return await response.blob();
 }

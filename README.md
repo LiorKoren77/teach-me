@@ -73,8 +73,10 @@ because path matching can diverge from routing, so each protected page also chec
 before rendering the client screen - subject tabs and the part strip on top, the teaching text
 above the tutor dialog, the sources on the right, stacked on narrow screens. Two contracts in it
 are worth naming. Page references are derived, not served: `lib/pageRefs.ts` scans the teaching
-body for "page N", "עמוד N" and "página N" and points a thumbnail at
-`/api/subjects/{id}/pages/{n}/image` for each, until the backend returns them structurally. And
+body for "page N", "עמוד N" and "página N" and shows a thumbnail for each, until the backend
+returns them structurally. The thumbnail images come from `/api/subjects/{id}/pages/{n}/image`,
+which accepts a bearer token only - an `<img src>` cannot send one, so `hooks/usePageImage.ts`
+fetches each page through the API client and hands the browser an object URL instead. And
 the re-explanation shows a waiting notice until its first event, because the API generates the
 whole re-explanation before it sends a byte (see "Re-explanation stream"); the next round stays
 disabled until the `done` event arrives.
