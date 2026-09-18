@@ -5,7 +5,7 @@ import pytest
 from teachme.adapters.embeddings.fake import FakeEmbedder
 from teachme.adapters.file_store.local import LocalFileStore
 from teachme.domain.models import SubjectState
-from teachme.ingestion.bundle import BundleReader
+from teachme.ingestion.bundle import BundleReader, bundle_slug
 from teachme.ingestion.errors import SubjectLocked
 from teachme.repositories.usage import UsageRepository
 from tests.helpers import make_pdf
@@ -78,6 +78,26 @@ def test_import_into_published_subject_is_locked(db, make_container, tmp_path):
 
     with pytest.raises(SubjectLocked):
         container.export_import.import_source(target, out)
+
+
+def test_import_rolls_back_and_skips_bundle_mirror_on_failure(db, make_container, tmp_path, monkeypatch):
+    container = _container(make_container)
+    subject, source = _ingested(container)
+    out = container.export_import.export_source(source.id, tmp_path / "export")
+
+    target = container.subject_service.get_or_create("Geo copy")
+
+    def boom(records):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(container.search, "upsert", boom)
+
+    with pytest.raises(RuntimeError):
+        container.export_import.import_source(target, out)
+
+    assert container.sources.list_by_subject(target.id) == []
+    subject_slug = bundle_slug(target.name, target.id)
+    assert not (tmp_path / "digest" / subject_slug).exists()
 
 
 def test_import_reembeds_when_model_differs(db, make_container, tmp_path):

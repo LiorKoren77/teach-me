@@ -44,46 +44,57 @@ class ExportImportService:
         pages, figures, chunks = reader.pages(), reader.figures(), reader.chunks()
 
         file_key = f"imported/{meta.source_id}/{meta.filename}"
-        source = self.d.sources.find_by_file_key(subject.id, file_key)
-        if source is None:
-            source = self.d.sources.create(subject.id, meta.filename, meta.media_type, file_key, meta.size)
-        self.d.sources.set_status(source.id, SourceStatus.INDEXING)
-        self.d.pages.replace(source.id, pages)
-        self.d.figures.replace(source.id, figures)
-        self.d.sources.set_extraction_result(
-            source.id,
-            page_count=meta.page_count,
-            vision_pages=meta.vision_pages,
-            detected_language=meta.language,
-        )
-
-        embeddings = reader.embeddings()
-        reuse = (
-            embeddings is not None
-            and meta.embedding_model == self.d.embedder.model
-            and len(embeddings) == len(chunks)
-        )
-        if reuse:
-            records = [
-                ChunkRecord(
-                    id=uuid4(),
-                    source_id=source.id,
-                    subject_id=subject.id,
-                    chunk=chunk,
-                    embedding=row.vector,
-                    embedding_model=row.model,
-                    tokens=tuple(tokenize(chunk.content, meta.language or "")),
+        try:
+            source = self.d.sources.find_by_file_key(subject.id, file_key)
+            if source is None:
+                source = self.d.sources.create(
+                    subject.id, meta.filename, meta.media_type, file_key, meta.size
                 )
-                for chunk, row in zip(chunks, embeddings, strict=True)
-            ]
-            self.d.search.delete_by_source(source.id)
-            self.d.search.upsert(records)
-        else:
-            records = index_chunks(
-                self.d.embedder, self.d.search, source.id, subject.id, chunks, language_code=meta.language
+            self.d.sources.set_status(source.id, SourceStatus.INDEXING)
+            self.d.pages.replace(source.id, pages)
+            self.d.figures.replace(source.id, figures)
+            self.d.sources.set_extraction_result(
+                source.id,
+                page_count=meta.page_count,
+                vision_pages=meta.vision_pages,
+                detected_language=meta.language,
             )
 
-        # Mirror the bundle into the primary store so the hosted copy is complete too.
+            embeddings = reader.embeddings()
+            reuse = (
+                embeddings is not None
+                and meta.embedding_model == self.d.embedder.model
+                and len(embeddings) == len(chunks)
+            )
+            if reuse:
+                records = [
+                    ChunkRecord(
+                        id=uuid4(),
+                        source_id=source.id,
+                        subject_id=subject.id,
+                        chunk=chunk,
+                        embedding=row.vector,
+                        embedding_model=row.model,
+                        tokens=tuple(tokenize(chunk.content, meta.language or "")),
+                    )
+                    for chunk, row in zip(chunks, embeddings, strict=True)
+                ]
+                self.d.search.delete_by_source(source.id)
+                self.d.search.upsert(records)
+            else:
+                records = index_chunks(
+                    self.d.embedder, self.d.search, source.id, subject.id, chunks, language_code=meta.language
+                )
+
+            self.d.sources.set_status(source.id, SourceStatus.READY)
+        except Exception:
+            self.d.conn.rollback()
+            raise
+        self.d.conn.commit()
+
+        # Mirror the bundle into the primary store so the hosted copy is complete too. Done
+        # only after the database work has committed, so a failed import never leaves a
+        # bundle behind for a source that does not exist.
         writer = BundleWriter(self.d.bundle_stores, bundle_slug(subject.name, subject.id))
         source_slug = bundle_slug(source.filename, source.id)
         writer.write_meta(
@@ -96,8 +107,6 @@ class ExportImportService:
         if records:
             writer.write_embeddings(source_slug, records)
 
-        self.d.sources.set_status(source.id, SourceStatus.READY)
-        self.d.conn.commit()
         return self.d.sources.get(source.id)
 
     def _meta(self, source: Source, embedding_model: str | None) -> SourceMeta:
