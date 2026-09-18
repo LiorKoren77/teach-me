@@ -299,3 +299,43 @@ New settings from `api/teachme/settings.py` (env names as in `.env.example`):
 - `RELEVANCE_HIGH` / `RELEVANCE_LOW` (`relevance_high` / `relevance_low`) - lexical relevance-score thresholds: at or above `high` an answer skips the model check; below `low` it is `LOW`.
 - `RELEVANCE_THRESHOLDS` (`relevance_thresholds`) - per-language JSON overrides of the two thresholds above (the lexical score is not equally generous in every language).
 - `CLERK_JWKS_URL` (`clerk_jwks_url`) - Clerk's JWKS endpoint; unset means no auth guard is built and every authenticated route answers `503`.
+
+## Deployment
+
+Deploying stages 1-4 to Vercel is operational work, not part of this repo's automated setup;
+the full checklist (and the running record of the pilot's per-student cost) lives in Task 11 of
+`docs/superpowers/plans/2026-09-18-stage4-frontend.md`. The notes below are what actually changes
+versus the local run described above.
+
+- **Project**: rename the Vercel project to `teach-me` in the dashboard (the CLI cannot rename an
+  existing project), then `vercel link` to it.
+- **API function**: `vercel.json` rewrites every `/api/*` request to `/api/index`, which is
+  `api/index.py` - a Python function hosting the same FastAPI app the local `uvicorn` command
+  runs (see "Running the API locally"). `next.config.ts`'s dev-only rewrite does not run there:
+  it is skipped whenever `VERCEL` is set, which Vercel sets on every build and invocation. Before
+  deploying, check the installed dependency footprint under `api/` (`requirements.txt`, generated
+  by `uv pip compile pyproject.toml`, currently 100 resolved packages) against Vercel's Python
+  function size limit; trim unused extras if a deploy gets close to it.
+- **Marketplace resources**: provision Postgres and Vercel Blob storage through the
+  `vercel:marketplace` skill (or the dashboard) - this wires `DATABASE_URL` and
+  `BLOB_READ_WRITE_TOKEN` into the project automatically.
+- **Backend environment variables** (`vercel env add`; see `.env.example` and "Stage 3 settings"
+  above for the full set): `DATABASE_URL`, `BLOB_READ_WRITE_TOKEN`, `FILE_STORE=vercel_blob`,
+  `LLM_PROVIDER=anthropic`, `EMBEDDINGS_PROVIDER=voyage`, `RERANKER_PROVIDER=voyage`,
+  `ANTHROPIC_API_KEY` (a service-account key with an expiry, not a personal one),
+  `VOYAGE_API_KEY`, `THUMBNAIL_WIDTH` (optional; defaults to 800), `CLERK_JWKS_URL`,
+  `CLERK_SECRET_KEY`.
+- **Frontend environment variables**: `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY`
+  (the same Clerk instance and secret as the backend's). See "Frontend" above for what each does
+  and which ones stay unset.
+- **Clerk setup**: one Clerk instance backs both `CLERK_JWKS_URL` (backend) and the
+  publishable/secret key pair (frontend); see "Authentication". Its session-token template must
+  add the custom claim `"role": "{{user.public_metadata.role}}"` - without it every token is
+  treated as a student and admin routes refuse with `403` (see "Authentication" and "Stage 3
+  settings").
+- After `vercel env pull .env.local`, run `teachme migrate` against the hosted database before
+  the first deploy, then `vercel` (preview) and `vercel --prod`; ingest, generate and publish one
+  real short PDF from the CLI and sign in to run one part end to end before trusting it with
+  students. Run `teachme usage` afterwards to see what that run cost.
+- Federation (design spec section 9) and the admin upload pane (stage 5) are deliberately out of
+  scope for this deployment - see Task 11 and "Self-review against the spec" in the plan.
