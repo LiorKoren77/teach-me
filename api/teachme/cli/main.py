@@ -368,17 +368,25 @@ def run_eval(
         file_okay=False,
         help="Folder of fixture folders; default: the ones shipped with the package",
     ),
+    keep: bool = typer.Option(
+        False, "--keep", help="Skip teardown; leave the fixture subjects published for inspection"
+    ),
 ) -> None:
     """Score generation and grading against the fixtures with the configured providers.
 
     Ingests each fixture source into a subject of its own, generates and publishes it, answers
     its questions as a synthetic student and prints how far the grades and routes matched what
     the fixture expects. Real providers cost real money: this runs the whole pipeline per fixture.
+    Each fixture subject is torn down (unpublished, its sources and row deleted) once scored,
+    unless `--keep` is given.
     """
 
     def body(c: Container) -> None:
         c.check_ready()
-        report = EvalRunner(c).run(languages=language or None, directory=fixtures)
+        report = EvalRunner(c).run(languages=language or None, directory=fixtures, keep=keep)
         typer.echo(report.render())
+        if keep:
+            for fixture in report.fixtures:
+                typer.echo(f"kept: {fixture.subject} ({fixture.subject_id})")
 
     _run(body)

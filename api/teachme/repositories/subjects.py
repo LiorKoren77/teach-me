@@ -63,3 +63,9 @@ class SubjectRepository:
         self._conn.execute(
             "UPDATE subjects SET current_outline_version = %s WHERE id = %s", (version, subject_id)
         )
+
+    def delete(self, subject_id: UUID) -> None:
+        """Cascades to sources, chunks, outlines (parts, sections, content, glossary, questions)
+        and the learning tables (part_progress, attempts and what they own). `llm_usage` rows
+        carry `subject_id` with no foreign key, so they survive a subject's deletion untouched."""
+        self._conn.execute("DELETE FROM subjects WHERE id = %s", (subject_id,))

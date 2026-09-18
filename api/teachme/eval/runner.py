@@ -5,7 +5,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 from teachme.container import Container
-from teachme.domain.models import AttemptQuestion, Question, QuestionKind, Subject
+from teachme.domain.models import AttemptQuestion, Question, QuestionKind, Subject, SubjectState
 from teachme.eval.fixtures import SOURCE_NAME, ExpectedAnswer, Fixture, FixtureCase, load_cases
 from teachme.eval.report import AnswerOutcome, EvalReport, FixtureReport
 
@@ -34,56 +34,83 @@ class EvalRunner:
     yields a comparison rather than a new experiment. Each fixture gets a freshly named subject
     and each expected answer its own synthetic student, so one answer's grade never changes which
     questions the next one is asked.
+
+    The fixture subject is scratch, not material to keep: unless `keep=True`, it is unpublished,
+    its sources deleted and its row dropped once the fixture has run, so an eval subject never
+    lingers in `GET /api/subjects` for a student to see.
     """
 
     def __init__(self, container: Container) -> None:
         self._c = container
 
-    def run(self, *, languages: Sequence[str] | None = None, directory: Path | None = None) -> EvalReport:
+    def run(
+        self, *, languages: Sequence[str] | None = None, directory: Path | None = None, keep: bool = False
+    ) -> EvalReport:
         cases = load_cases(directory, languages=languages)
-        return EvalReport(fixtures=[self._run_case(case) for case in cases])
+        return EvalReport(fixtures=[self._run_case(case, keep=keep) for case in cases])
 
     # one fixture ----------------------------------------------------------------------------
-    def _run_case(self, case: FixtureCase) -> FixtureReport:
+    def _run_case(self, case: FixtureCase, *, keep: bool) -> FixtureReport:
         spec = case.spec
-        subject = self._prepare(case)
-        parts, sections = self._outline_shape(subject)
-        notes: list[str] = []
-        outcomes = [
-            outcome
-            for index, expected in enumerate(spec.answers)
-            if (outcome := self._ask(subject, spec, expected, index, notes)) is not None
-        ]
-        routed = [o for o in outcomes if o.route_agrees is not None]
-        return FixtureReport(
-            language=spec.language,
-            subject=subject.name,
-            subject_id=subject.id,
-            outline_ok=self._outline_ok(subject, spec),
-            parts=len(parts),
-            sections=sections,
-            # An answer the harness could not ask counts against agreement: the denominator is
-            # what the fixture asked for, not what happened to run.
-            grading_agreement=sum(o.agrees for o in outcomes) / len(spec.answers),
-            route_agreement=(sum(bool(o.route_agrees) for o in routed) / len(routed)) if routed else 1.0,
-            relevance_false_rejects=sum(
-                1 for o in outcomes if o.expected_grade in REAL_ATTEMPT_GRADES and not o.accepted
-            ),
-            cost_usd=self._cost(subject.id),
-            answers=outcomes,
-            notes=notes,
-        )
+        name = f"eval-{spec.language}-{uuid4().hex[:6]}"
+        try:
+            subject = self._prepare(case, name)
+            parts, sections = self._outline_shape(subject)
+            notes: list[str] = []
+            outcomes = [
+                outcome
+                for index, expected in enumerate(spec.answers)
+                if (outcome := self._ask(subject, spec, expected, index, notes)) is not None
+            ]
+            routed = [o for o in outcomes if o.route_agrees is not None]
+            return FixtureReport(
+                language=spec.language,
+                subject=subject.name,
+                subject_id=subject.id,
+                outline_ok=self._outline_ok(subject, spec),
+                parts=len(parts),
+                sections=sections,
+                # An answer the harness could not ask counts against agreement: the denominator is
+                # what the fixture asked for, not what happened to run.
+                grading_agreement=sum(o.agrees for o in outcomes) / len(spec.answers),
+                route_agreement=(sum(bool(o.route_agrees) for o in routed) / len(routed)) if routed else 1.0,
+                relevance_false_rejects=sum(
+                    1 for o in outcomes if o.expected_grade in REAL_ATTEMPT_GRADES and not o.accepted
+                ),
+                cost_usd=self._cost(subject.id),
+                answers=outcomes,
+                notes=notes,
+            )
+        finally:
+            if not keep:
+                self._teardown(name)
 
-    def _prepare(self, case: FixtureCase) -> Subject:
+    def _prepare(self, case: FixtureCase, name: str) -> Subject:
         """A new subject per run, named after the fixture and a fresh suffix, so a second run
         compares against the first instead of colliding with it."""
         scope = self._c.scope
-        name = f"eval-{case.spec.language}-{uuid4().hex[:6]}"
         subject = scope.subject_service.get_or_create(name, case.spec.teach_in)
         source = scope.source_service.register(subject, SOURCE_NAME, case.source)
         scope.pipeline.ingest_source(source.id)
         scope.tutorial_service.generate(subject)
         return scope.tutorial_service.publish(subject)
+
+    def _teardown(self, name: str) -> None:
+        """Remove the subject this run published, if it got that far: unpublish it so its
+        sources can be deleted, delete each source (files, chunks, rows), then delete the subject
+        row itself. Usage rows are left alone - `llm_usage.subject_id` carries no foreign key, so
+        the fixture's cost stays on the books after the subject it was spent on is gone."""
+        scope = self._c.scope
+        scope.conn.rollback()  # a mid-run failure may have left the connection mid-transaction
+        subject = scope.subjects.get_by_name(name)
+        if subject is None:
+            return
+        if subject.state == SubjectState.PUBLISHED:
+            scope.subject_service.set_state(subject, SubjectState.DRAFT)
+        for source in scope.source_service.list(subject):
+            scope.source_service.delete(source.id)
+        scope.subjects.delete(subject.id)
+        scope.conn.commit()
 
     def _outline_shape(self, subject: Subject) -> tuple[list, int]:
         scope = self._c.scope
