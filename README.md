@@ -69,6 +69,16 @@ Vitest plus Testing Library (`npm run test`), one Playwright flow (`npm run e2e`
 optimistic check on `/learn` and `/admin`. Clerk Core 3 deprecated route-matcher protection
 because path matching can diverge from routing, so each protected page also checks for itself.
 
+`/learn/[subjectId]` is that kind of page: a server component that calls `await auth.protect()`
+before rendering the client screen - subject tabs and the part strip on top, the teaching text
+above the tutor dialog, the sources on the right, stacked on narrow screens. Two contracts in it
+are worth naming. Page references are derived, not served: `lib/pageRefs.ts` scans the teaching
+body for "page N", "עמוד N" and "página N" and points a thumbnail at
+`/api/subjects/{id}/pages/{n}/image` for each, until the backend returns them structurally. And
+the re-explanation shows a waiting notice until its first event, because the API generates the
+whole re-explanation before it sends a byte (see "Re-explanation stream"); the next round stays
+disabled until the `done` event arrives.
+
 ## API
 
 ### Running the API locally
