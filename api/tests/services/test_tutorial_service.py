@@ -5,8 +5,10 @@ import pytest
 from teachme.container import Container
 from teachme.domain.models import ContentStatus, SubjectState
 from teachme.generation.errors import GenerationError, SubjectNotReady
+from teachme.generation.fake_responders import default_responders
 from teachme.generation.glossary import GlossaryOut
 from teachme.generation.question_bank import QuestionBankOut
+from teachme.generation.teaching import TeachingOut
 from teachme.ingestion.bundle import bundle_slug
 from teachme.ingestion.errors import SubjectLocked
 from teachme.ports.llm import LLMError
@@ -189,3 +191,25 @@ def test_generate_rejects_part_selection_before_any_outline_exists(container):
     with pytest.raises(GenerationError, match="no such parts"):
         container.tutorial_service.generate(subject, parts=[0])
     assert container.outlines.latest(subject.id) is None
+
+
+def test_publish_picks_the_newest_complete_version(container):
+    subject = _ingested_subject(container)
+    container.tutorial_service.generate(subject)
+    assert container.tutorial_service.status(subject).publishable
+
+    teaching = default_responders()[TeachingOut]
+
+    def fail_in_english(request):
+        text = "\n".join(part.text or "" for part in request.parts if part.kind == "text")
+        if "LANGUAGE: en" in text:
+            raise LLMError("teaching service down")
+        return teaching(request)
+
+    container.llm.inner.set_responder(TeachingOut, fail_in_english)
+    report = container.tutorial_service.generate(subject)
+    assert report.outline_version == 2 and report.failures
+    assert not container.tutorial_service.status(subject).publishable
+
+    published = container.tutorial_service.publish(subject)
+    assert published.state == SubjectState.PUBLISHED and published.current_outline_version == 1

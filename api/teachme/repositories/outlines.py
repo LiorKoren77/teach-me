@@ -83,6 +83,14 @@ class OutlineRepository:
         ).fetchone()
         return _outline(row) if row else None
 
+    def versions(self, subject_id: UUID) -> list[Outline]:
+        """Every version of a subject's outline, newest first; publishing walks these in order."""
+        rows = self._conn.execute(
+            "SELECT id, subject_id, version, model FROM outlines WHERE subject_id = %s ORDER BY version DESC",
+            (subject_id,),
+        ).fetchall()
+        return [_outline(row) for row in rows]
+
     def get_version(self, subject_id: UUID, version: int) -> Outline | None:
         row = self._conn.execute(
             "SELECT id, subject_id, version, model FROM outlines WHERE subject_id = %s AND version = %s",

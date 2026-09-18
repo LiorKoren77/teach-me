@@ -40,6 +40,7 @@ def test_outline_versions_and_structure(db):
     assert second.version == 2
     assert repo.latest(subject.id).version == 2
     assert repo.get_version(subject.id, 1) == outline
+    assert [o.version for o in repo.versions(subject.id)] == [2, 1]
     assert [p.title for p in repo.parts(outline.id)] == ["Intro", "Deep"]
     assert [s.title for s in repo.sections(parts[0].id)] == ["What", "Why"]
     assert repo.get_part(parts[1].id).page_end == 9

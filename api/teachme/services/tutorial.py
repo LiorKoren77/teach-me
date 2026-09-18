@@ -396,8 +396,10 @@ class TutorialService:
         return questions
 
     # status and publishing ------------------------------------------------------------------
-    def status(self, subject: Subject) -> TutorialStatus:
-        outline = self._outlines.latest(subject.id)
+    def status(self, subject: Subject, outline: Outline | None = None) -> TutorialStatus:
+        """Readiness of one outline version; the latest one unless a version is given."""
+        if outline is None:
+            outline = self._outlines.latest(subject.id)
         if outline is None:
             return TutorialStatus(
                 subject=subject.name,
@@ -443,9 +445,20 @@ class TutorialService:
         self._listeners.append(listener)
 
     def publish(self, subject: Subject) -> Subject:
-        status = self.status(subject)
-        if not status.publishable:
-            incomplete = [lang.language for lang in status.languages if not lang.complete] or ["no outline"]
+        """Publish the newest complete version. A draft regeneration that is still incomplete (or
+        failed) therefore never blocks publishing, and never unpublishes what students are using."""
+        latest: TutorialStatus | None = None
+        status: TutorialStatus | None = None
+        for outline in self._outlines.versions(subject.id):
+            candidate = self.status(subject, outline)
+            latest = latest or candidate
+            if candidate.publishable:
+                status = candidate
+                break
+        if status is None:
+            incomplete = (
+                [lang.language for lang in latest.languages if not lang.complete] if latest else []
+            ) or ["no outline"]
             raise SubjectNotReady(f"cannot publish {subject.name!r}: incomplete for {incomplete}")
         assert status.outline_version is not None
         changed = subject.current_outline_version != status.outline_version
