@@ -44,7 +44,9 @@ class ExportImportService:
         pages, figures, chunks = reader.pages(), reader.figures(), reader.chunks()
 
         file_key = f"imported/{meta.source_id}/{meta.filename}"
-        source = self.d.sources.create(subject.id, meta.filename, meta.media_type, file_key, meta.size)
+        source = self.d.sources.find_by_file_key(subject.id, file_key)
+        if source is None:
+            source = self.d.sources.create(subject.id, meta.filename, meta.media_type, file_key, meta.size)
         self.d.sources.set_status(source.id, SourceStatus.INDEXING)
         self.d.pages.replace(source.id, pages)
         self.d.figures.replace(source.id, figures)

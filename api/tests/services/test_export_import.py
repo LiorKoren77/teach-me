@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import pytest
+
 from teachme.adapters.embeddings.fake import FakeEmbedder
 from teachme.adapters.file_store.local import LocalFileStore
+from teachme.domain.models import SubjectState
 from teachme.ingestion.bundle import BundleReader
+from teachme.ingestion.errors import SubjectLocked
 from teachme.repositories.usage import UsageRepository
 from tests.helpers import make_pdf
 
@@ -47,6 +51,33 @@ def test_import_reuses_vectors_when_model_matches(db, make_container, tmp_path):
     assert container.search.count(target.id) == 3
     assert _embed_calls(container) == before  # no re-embedding
     assert len(container.pages.list(imported.id)) == 3
+
+
+def test_import_replaces_existing_import_of_same_bundle(db, make_container, tmp_path):
+    container = _container(make_container)
+    subject, source = _ingested(container)
+    out = container.export_import.export_source(source.id, tmp_path / "export")
+
+    target = container.subject_service.get_or_create("Geo copy")
+    first = container.export_import.import_source(target, out)
+    second = container.export_import.import_source(target, out)
+
+    assert first.id == second.id
+    assert len(container.sources.list_by_subject(target.id)) == 1
+    assert container.search.count(target.id) == 3
+
+
+def test_import_into_published_subject_is_locked(db, make_container, tmp_path):
+    container = _container(make_container)
+    subject, source = _ingested(container)
+    out = container.export_import.export_source(source.id, tmp_path / "export")
+
+    target = container.subject_service.get_or_create("Geo copy")
+    container.subject_service.set_state(target, SubjectState.PUBLISHED)
+    target = container.subject_service.require(target.name)
+
+    with pytest.raises(SubjectLocked):
+        container.export_import.import_source(target, out)
 
 
 def test_import_reembeds_when_model_differs(db, make_container, tmp_path):

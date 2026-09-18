@@ -56,6 +56,13 @@ class SourceRepository:
         ).fetchall()
         return [_row_to_source(row) for row in rows]
 
+    def find_by_file_key(self, subject_id: UUID, file_key: str) -> Source | None:
+        row = self._conn.execute(
+            f"SELECT {_COLUMNS} FROM sources WHERE subject_id = %s AND file_key = %s",
+            (subject_id, file_key),
+        ).fetchone()
+        return _row_to_source(row) if row is not None else None
+
     def set_status(
         self,
         source_id: UUID,
