@@ -187,7 +187,12 @@ class Container:
         if self.settings.job_runner == "sqs":
             if not self.settings.sqs_queue_url:
                 raise ConfigurationError("JOB_RUNNER=sqs requires SQS_QUEUE_URL")
-            return SqsJobRunner(self.settings.sqs_queue_url, self.settings.aws_region, jobs=self.jobs)
+            return SqsJobRunner(
+                self.settings.sqs_queue_url,
+                self.settings.aws_region,
+                jobs=self.jobs,
+                commit=self.conn.commit,
+            )
         return InProcessJobRunner(
             {"ingest_source": self._ingest_job},
             jobs=self.jobs,

@@ -93,3 +93,41 @@ def test_sqs_sends_message_with_job_id():
         job_id = runner.enqueue("ingest_source", {"source_id": "abc"})
         body = json.loads(sqs.receive_message(QueueUrl=queue_url)["Messages"][0]["Body"])
         assert body == {"job_id": str(job_id), "kind": "ingest_source", "payload": {"source_id": "abc"}}
+
+
+def test_sqs_commits_the_job_row_before_sending(db):
+    """The job row must be durable even if the caller rolls back after enqueue returns - e.g.
+    because send_message succeeded but something later in the same request failed."""
+    jobs = JobRepository(db)
+    with mock_aws():
+        sqs = boto3.client("sqs", region_name="eu-central-1")
+        queue_url = sqs.create_queue(QueueName="teachme-test")["QueueUrl"]
+        runner = SqsJobRunner(
+            queue_url=queue_url, region="eu-central-1", jobs=jobs, client=sqs, commit=db.commit
+        )
+        job_id = runner.enqueue("ingest_source", {"source_id": "abc"})
+
+    db.rollback()
+    assert jobs.get(job_id)["status"] == "queued"
+
+
+def test_sqs_marks_the_job_failed_and_commits_when_send_fails(db):
+    jobs = JobRepository(db)
+
+    class BoomClient:
+        def send_message(self, **kwargs):
+            raise RuntimeError("queue unreachable")
+
+    runner = SqsJobRunner(
+        queue_url="http://example/queue",
+        region="eu-central-1",
+        jobs=jobs,
+        client=BoomClient(),
+        commit=db.commit,
+    )
+    with pytest.raises(RuntimeError, match="queue unreachable"):
+        runner.enqueue("ingest_source", {"source_id": "abc"})
+
+    db.rollback()
+    row = db.execute("SELECT status, error FROM jobs WHERE kind = 'ingest_source'").fetchone()
+    assert row["status"] == "failed" and row["error"] == "queue unreachable"
