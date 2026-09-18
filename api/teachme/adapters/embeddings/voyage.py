@@ -21,7 +21,11 @@ class VoyageEmbedder:
     name = "voyage"
 
     def __init__(
-        self, model: str, dimension: int = 1024, client: Any | None = None, batch_size: int = 128,
+        self,
+        model: str,
+        dimension: int = 1024,
+        client: Any | None = None,
+        batch_size: int = 128,
         api_key: str | None = None,
     ) -> None:
         self.model = model
@@ -49,4 +53,7 @@ class VoyageEmbedder:
     )
     def _embed(self, texts: list[str], input_type: str) -> EmbeddingResult:
         response = self._client.embed(texts, model=self.model, input_type=input_type)
-        return EmbeddingResult(vectors=[list(v) for v in response.embeddings], tokens=int(response.total_tokens))
+        return EmbeddingResult(
+            vectors=[list(v) for v in response.embeddings],
+            tokens=int(response.total_tokens),
+        )

@@ -40,16 +40,22 @@ class _StubClient:
         return _Stream(self._message)
 
 
-def _message(stop_reason="end_turn", parsed=Answer(value=7)):
-    usage = SimpleNamespace(input_tokens=120, output_tokens=8, cache_read_input_tokens=100, cache_creation_input_tokens=None)
+def _message(stop_reason="end_turn", parsed=None):
+    parsed = parsed if parsed is not None else Answer(value=7)
+    usage = SimpleNamespace(
+        input_tokens=120, output_tokens=8, cache_read_input_tokens=100, cache_creation_input_tokens=None
+    )
     return SimpleNamespace(stop_reason=stop_reason, parsed_output=parsed, usage=usage, model="claude-opus-5")
 
 
 def _request():
     return StructuredRequest(
-        purpose="test", model="claude-opus-5", system="sys",
+        purpose="test",
+        model="claude-opus-5",
+        system="sys",
         parts=(ContentPart.of_document(b"%PDF-1.4", "application/pdf"), ContentPart.of_text("Read it")),
-        max_tokens=4000, effort="low",
+        max_tokens=4000,
+        effort="low",
     )
 
 
@@ -73,9 +79,11 @@ def test_builds_request_and_returns_parsed_output():
 
 def test_refusal_and_truncation_raise():
     with pytest.raises(LLMRefused):
-        AnthropicLLM(client=_StubClient(_message(stop_reason="refusal"))).generate_structured(_request(), Answer)
+        llm = AnthropicLLM(client=_StubClient(_message(stop_reason="refusal")))
+        llm.generate_structured(_request(), Answer)
     with pytest.raises(LLMOutputTruncated):
-        AnthropicLLM(client=_StubClient(_message(stop_reason="max_tokens"))).generate_structured(_request(), Answer)
+        llm = AnthropicLLM(client=_StubClient(_message(stop_reason="max_tokens")))
+        llm.generate_structured(_request(), Answer)
 
 
 def test_capabilities_include_pdf_and_images():

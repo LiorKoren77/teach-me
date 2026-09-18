@@ -17,7 +17,10 @@ class FakeEmbedder:
         self.model = model
 
     def embed_documents(self, texts: Sequence[str]) -> EmbeddingResult:
-        return EmbeddingResult(vectors=[self._vector(t) for t in texts], tokens=sum(max(1, len(t) // 4) for t in texts))
+        return EmbeddingResult(
+            vectors=[self._vector(t) for t in texts],
+            tokens=sum(max(1, len(t) // 4) for t in texts),
+        )
 
     def embed_query(self, text: str) -> EmbeddingResult:
         return self.embed_documents([text])

@@ -17,9 +17,17 @@ from teachme.ports.llm import (
     T,
 )
 
-MEDIA_TYPES = frozenset({
-    "application/pdf", "image/png", "image/jpeg", "image/gif", "image/webp", "text/plain", "text/markdown",
-})
+MEDIA_TYPES = frozenset(
+    {
+        "application/pdf",
+        "image/png",
+        "image/jpeg",
+        "image/gif",
+        "image/webp",
+        "text/plain",
+        "text/markdown",
+    }
+)
 
 
 class AnthropicLLM:
