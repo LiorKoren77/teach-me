@@ -1,13 +1,20 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 
 from teachme.adapters.db.engine import connect
 from teachme.adapters.db.migrate import apply_migrations
+from teachme.container import Container
+from teachme.settings import Settings
 
 TABLES = ["llm_usage", "jobs", "chunks", "source_figures", "source_pages", "sources", "subjects"]
+
+# A leaked idle-in-transaction connection would otherwise hang the teardown TRUNCATE for as long
+# as the test runner lets it; 15s makes that failure fast and loud instead.
+_LOCK_TIMEOUT = "SET lock_timeout = '15s'"
 
 
 @pytest.fixture(scope="session")
@@ -21,6 +28,7 @@ def test_database_url() -> str:
 @pytest.fixture(scope="session")
 def migrated_database(test_database_url: str) -> str:
     conn = connect(test_database_url)
+    conn.execute(_LOCK_TIMEOUT)
     try:
         apply_migrations(conn)
     finally:
@@ -31,6 +39,7 @@ def migrated_database(test_database_url: str) -> str:
 @pytest.fixture
 def db(migrated_database: str):
     conn = connect(migrated_database)
+    conn.execute(_LOCK_TIMEOUT)
     try:
         conn.execute("TRUNCATE " + ", ".join(TABLES) + " CASCADE")
         conn.commit()
@@ -40,3 +49,35 @@ def db(migrated_database: str):
         conn.execute("TRUNCATE " + ", ".join(TABLES) + " CASCADE")
         conn.commit()
         conn.close()
+
+
+@pytest.fixture
+def make_container(migrated_database: str, tmp_path: Path):
+    """Builds Containers on the fake stack, closing every one on teardown - even if the test
+    raises first - so a failing assertion never leaks a connection into the next test."""
+    containers: list[Container] = []
+
+    def factory(**overrides) -> Container:
+        base = dict(
+            database_url=migrated_database,
+            llm_provider="fake",
+            embeddings_provider="fake",
+            reranker_provider="noop",
+            file_store="local",
+            local_files_dir=tmp_path / "files",
+            digest_dir=tmp_path / "digest",
+            write_local_bundle=True,
+            job_runner="inprocess",
+            enabled_languages=["he", "en", "pt"],
+            allowed_upload_types=None,
+        )
+        base.update(overrides)
+        c = Container(Settings(_env_file=None, **base))
+        containers.append(c)
+        return c
+
+    try:
+        yield factory
+    finally:
+        for c in containers:
+            c.close()
