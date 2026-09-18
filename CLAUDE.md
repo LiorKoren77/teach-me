@@ -9,4 +9,4 @@
 - GitHub: this is a personal project under `LiorKoren77`. Never use the company
   `gh` account. For `gh` calls use `GH_TOKEN=$(gh auth token --user LiorKoren77)`.
   Repo-local git identity is already set to LiorKoren77.
-- Stages 1 and 2 (ingestion, tutorial generation) are complete. Run `teachme --help`.
+- Stages 1 to 3 (ingestion, tutorial generation, learning loop API) are complete. Run `teachme --help`; API via `uvicorn index:app --app-dir api`.

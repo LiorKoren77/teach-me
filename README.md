@@ -38,7 +38,9 @@ not it has been published, instead of the published one. The subject digest bund
 under `digest/<subject slug>/v<outline version>/`: `outline.json`, `glossary.json`,
 `glossary.<lang>.json`, `parts/NN.<lang>.md`, `questions.<lang>.jsonl`.
 
-## Running the API locally
+## API
+
+### Running the API locally
 
 ```bash
 docker compose up -d && teachme migrate                 # once
@@ -49,13 +51,77 @@ curl localhost:8000/api/health
 ```
 
 `api/index.py` is the file Vercel rewrites every `/api/*` request to, so the local server and the
-deployment serve the same application. Every route except `/api/health` needs a Clerk session
-token: set `CLERK_JWKS_URL` to the instance's JWKS endpoint and send
-`Authorization: Bearer <token>`. Without that setting those routes answer 503 rather than trust
-the caller. Tests never reach Clerk - they override the `current_user` dependency.
+deployment serve the same application. `LLM_PROVIDER=fake EMBEDDINGS_PROVIDER=fake
+RERANKER_PROVIDER=noop` runs the whole pipeline, including the learning loop, without any API key.
+`docker-compose.yml` maps the container's Postgres to host port 5433 (a native Postgres commonly
+occupies 5432 on the dev machine). Tests:
+`TEST_DATABASE_URL=postgresql://teachme:teachme@localhost:5433/teachme_test pytest -q`. On Vercel,
+`vercel.json` routes every `/api/*` request to the FastAPI function.
 
-Set `LLM_PROVIDER=fake EMBEDDINGS_PROVIDER=fake RERANKER_PROVIDER=noop` to run the whole pipeline
-without any API key. `docker-compose.yml` maps the container's Postgres to host port 5433 (a native
-Postgres commonly occupies 5432 on the dev machine). Tests:
-`TEST_DATABASE_URL=postgresql://teachme:teachme@localhost:5433/teachme_test pytest -q`.
-On Vercel, `vercel.json` routes every `/api/*` request to the FastAPI function.
+### Authentication
+
+Every route except `/api/health` needs a Clerk session token: set `CLERK_JWKS_URL` to the
+instance's JWKS endpoint and send `Authorization: Bearer <token>`. Without `CLERK_JWKS_URL` set,
+no guard is built at all and those routes answer `503` rather than trust the caller. The Clerk
+session-token template must add a custom claim `"role": "{{user.public_metadata.role}}"` -
+without it every token is treated as a student, since a missing `role` claim falls back to
+`student`, and admin routes will refuse with `403`. Tests never reach Clerk - they override the
+`current_user` dependency.
+
+### Routes
+
+| Method | Path | Caller | Purpose |
+| --- | --- | --- | --- |
+| GET | `/api/health` | anyone | Liveness check; no auth required. |
+| GET | `/api/subjects` | student | List published subjects (in this deployment's enabled languages) with the caller's per-part progress. |
+| GET | `/api/subjects/{subject_id}` | student | Open a subject: its parts, each with the caller's progress and lock state. |
+| POST | `/api/subjects/{subject_id}/parts/{position}/start` | student | Start or resume the caller's attempt at a part; returns the rendered part text and current session state. |
+| POST | `/api/attempts/{attempt_id}/round` | student | Sample and begin the attempt's next round of questions. |
+| POST | `/api/attempts/{attempt_id}/answer` | student | Submit an answer (free text or multiple-choice) for the current question; grades it and returns the next question or the round result. |
+| GET | `/api/attempts/{attempt_id}/reexplain` | student | Server-sent-event stream that re-explains the weak sections of a failed round. |
+| GET | `/api/admin/subjects` | admin | List every subject regardless of publication state. |
+| GET | `/api/admin/subjects/{subject_id}/sources` | admin | List a subject's ingested sources and their status. |
+| GET | `/api/admin/usage` | admin | Model/embedding usage and cost summary, optionally filtered by `subject_id`. |
+
+### Error statuses
+
+`api/teachme/routes/errors.py` maps domain exceptions to HTTP status codes (most specific class
+wins when one refusal subclasses another):
+
+| Status | Error | Covers |
+| --- | --- | --- |
+| 404 | `NotFound` | The subject, source, attempt, question or other resource does not exist. |
+| 403 | `NotAllowed` | The caller does not own the attempt, the part is locked, the language is not enabled for the subject, or (via `require_role`) the caller's role does not permit an admin route. |
+| 429 | `RateLimited` | A `NotAllowed` subclass: the caller submitted more answers/rejections than `MAX_ANSWERS_PER_MINUTE` allows in the last minute. |
+| 409 | `LearningError` (and `IllegalTransition`, `GenerationError`, `SubjectLocked`) | A state-machine refusal - e.g. answering a question that is not open, re-explaining outside `REINFORCING`, an illegal part-status transition, or a subject locked against generation/ingestion. |
+| 422 | *(FastAPI's built-in request validation, not in this table)* | A malformed request body - e.g. `AnswerRequest` requires exactly one of `answer_text`/`answer_choice`, and rejects neither or both. |
+
+Anything not listed here is a bug and stays a `500` with no detail, so internals never leak to
+the client.
+
+### Re-explanation stream (SSE)
+
+`GET /api/attempts/{attempt_id}/reexplain` returns `text/event-stream`. The model is generated and
+persisted to completion before any events are sent, then replayed to the client:
+
+- zero or more `delta` events, each `{"text": "..."}` - one per chunk the model produced, glossary
+  placeholders still unresolved;
+- one final `done` event, `{"text": "...", "truncated": bool, "round_no": int}` - `text` is the
+  whole re-explanation rendered for the reader's language (placeholders resolved), `truncated` is
+  true when the model stopped at its token ceiling, and `round_no` is the failed round it
+  reinforces.
+
+### Stage 3 settings
+
+New settings from `api/teachme/settings.py` (env names as in `.env.example`):
+
+- `MODEL_GRADER` (`model_grader`) - model used to grade free-text answers against the rubric.
+- `MODEL_RELEVANCE_CHECK` (`model_relevance_check`) - cheap model used for the on-topic check between the lexical scorer and the grader.
+- `MODEL_REEXPLAIN` (`model_reexplain`) - model used to generate the re-explanation of weak sections.
+- `MAX_ANSWER_CHARS` (`max_answer_chars`) - free-text answers longer than this are rejected as junk before any model call.
+- `MAX_ANSWERS_PER_MINUTE` (`max_answers_per_minute`) - per-student rate limit on answers and rejections combined.
+- `MAX_REJECTIONS_PER_QUESTION` (`max_rejections_per_question`) - how many junk/off-topic rejections a question tolerates before it is auto-graded and closed.
+- `REINFORCE_SECTIONS_CAP` (`reinforce_sections_cap`) - maximum number of weak sections covered by one re-explanation.
+- `RELEVANCE_HIGH` / `RELEVANCE_LOW` (`relevance_high` / `relevance_low`) - lexical relevance-score thresholds: at or above `high` an answer skips the model check; below `low` it is `LOW`.
+- `RELEVANCE_THRESHOLDS` (`relevance_thresholds`) - per-language JSON overrides of the two thresholds above (the lexical score is not equally generous in every language).
+- `CLERK_JWKS_URL` (`clerk_jwks_url`) - Clerk's JWKS endpoint; unset means no auth guard is built and every authenticated route answers `503`.
