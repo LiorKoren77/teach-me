@@ -227,6 +227,10 @@ class Container:
                 f"embedder {self.embedder.model!r} has dimension {self.embedder.dimension}, "
                 f"chunks table expects {expected}"
             )
+        # Touch every adapter so a missing/invalid configuration surfaces here, at startup,
+        # rather than on the first request that happens to need it.
+        _ = (self.files, self.job_runner, self.llm, self.reranker)
+        self.conn.rollback()
 
     def close(self) -> None:
         for name in ("conn", "usage_conn"):

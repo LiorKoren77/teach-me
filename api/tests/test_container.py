@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import psycopg
 import pytest
 
 from teachme.container import ConfigurationError, Container
@@ -37,6 +38,19 @@ def test_s3_without_bucket_is_a_configuration_error(migrated_database, tmp_path)
     container = Container(_settings(migrated_database, tmp_path, file_store="s3"))
     with pytest.raises(ConfigurationError, match="S3_BUCKET"):
         _ = container.files
+
+
+def test_check_ready_surfaces_configuration_errors(migrated_database, tmp_path):
+    container = Container(_settings(migrated_database, tmp_path, file_store="s3"))
+    with pytest.raises(ConfigurationError, match="S3_BUCKET"):
+        container.check_ready()
+
+
+def test_check_ready_leaves_the_connection_idle(migrated_database, tmp_path):
+    container = Container(_settings(migrated_database, tmp_path))
+    container.check_ready()
+    assert container.conn.info.transaction_status == psycopg.pq.TransactionStatus.IDLE
+    container.close()
 
 
 def test_dimension_mismatch_is_a_configuration_error(migrated_database, tmp_path, monkeypatch):
