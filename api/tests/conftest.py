@@ -10,7 +10,23 @@ from teachme.adapters.db.migrate import apply_migrations
 from teachme.container import Container
 from teachme.settings import Settings
 
-TABLES = ["llm_usage", "jobs", "chunks", "source_figures", "source_pages", "sources", "subjects"]
+TABLES = [
+    "llm_usage",
+    "jobs",
+    "questions",
+    "section_content",
+    "part_content",
+    "glossary_translations",
+    "glossary_terms",
+    "sections",
+    "parts",
+    "outlines",
+    "chunks",
+    "source_figures",
+    "source_pages",
+    "sources",
+    "subjects",
+]
 
 # A leaked idle-in-transaction connection would otherwise hang the teardown TRUNCATE for as long
 # as the test runner lets it; 15s makes that failure fast and loud instead.

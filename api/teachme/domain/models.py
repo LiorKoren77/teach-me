@@ -100,3 +100,105 @@ class ChunkHit(Frozen):
     page_start: int
     page_end: int
     score: float
+
+
+class ContentStatus(StrEnum):
+    GENERATING = "generating"
+    READY = "ready"
+    FAILED = "failed"
+
+
+class QuestionKind(StrEnum):
+    FREE_TEXT = "free_text"
+    MULTIPLE_CHOICE = "multiple_choice"
+
+
+class Outline(Frozen):
+    id: UUID
+    subject_id: UUID
+    version: int
+    model: str
+
+
+class _PageRange(Frozen):
+    page_start: int = Field(ge=0)
+    page_end: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def _ordered(self) -> _PageRange:
+        if self.page_end < self.page_start:
+            raise ValueError("page_end must not precede page_start")
+        return self
+
+
+class Part(_PageRange):
+    id: UUID
+    outline_id: UUID
+    position: int = Field(ge=0)
+    title: str
+
+
+class Section(_PageRange):
+    id: UUID
+    part_id: UUID
+    position: int = Field(ge=0)
+    title: str = ""
+
+
+class GlossaryTerm(Frozen):
+    id: UUID
+    outline_id: UUID
+    slug: str
+    source_term: str
+    definition: str
+    pages: tuple[int, ...]
+
+
+class GlossaryTranslation(Frozen):
+    term_id: UUID
+    language: str
+    term: str
+
+
+class PartContent(Frozen):
+    part_id: UUID
+    language: str
+    title: str
+    body: str  # Markdown with {{term:slug|words}} placeholders
+    key_points: tuple[str, ...]
+    status: ContentStatus
+    model: str
+    error: str | None = None
+
+
+class SectionContent(Frozen):
+    section_id: UUID
+    language: str
+    title: str
+    summary: str
+
+
+class Question(Frozen):
+    id: UUID
+    section_id: UUID
+    language: str
+    kind: QuestionKind
+    prompt: str
+    expected_answer: str
+    rubric: tuple[str, ...]
+    key_terms: tuple[str, ...]
+    exact_values: tuple[str, ...]
+    choices: tuple[str, ...] | None = None
+    correct_choice: int | None = None
+    position: int = 0
+
+    @model_validator(mode="after")
+    def _choices_match_kind(self) -> Question:
+        if self.kind == QuestionKind.MULTIPLE_CHOICE:
+            if not self.choices or len(self.choices) < 2:
+                raise ValueError("multiple choice needs at least two choices")
+            if self.correct_choice is None or not 0 <= self.correct_choice < len(self.choices):
+                raise ValueError("correct_choice must index into choices")
+        elif self.choices is not None or self.correct_choice is not None:
+            raise ValueError("free text questions carry no choices")
+        return self

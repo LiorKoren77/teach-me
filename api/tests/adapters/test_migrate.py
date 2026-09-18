@@ -127,3 +127,27 @@ def test_apply_migrations_blocks_while_another_connection_holds_the_lock(migrate
     assert not thread.is_alive()
     assert result == [[]]
     conn.close()
+
+
+def test_tutorial_tables_exist(migrated_database):
+    conn = connect(migrated_database)
+    try:
+        tables = {
+            row["table_name"]
+            for row in conn.execute(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
+            ).fetchall()
+        }
+        assert {
+            "outlines",
+            "parts",
+            "sections",
+            "glossary_terms",
+            "glossary_translations",
+            "part_content",
+            "section_content",
+            "questions",
+        } <= tables
+        assert "0002_tutorial" in applied_versions(conn)
+    finally:
+        conn.close()
