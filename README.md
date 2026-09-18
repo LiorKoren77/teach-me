@@ -68,6 +68,37 @@ and `hooks/*.ts`; every UI string comes from `lib/i18n.ts` (he, en, pt) and the 
 `<html lang dir>` from the `teachme_lang` cookie, so Hebrew renders right-to-left. Tests are
 Vitest plus Testing Library (`npm run test`), one Playwright flow (`npm run e2e`).
 
+### End-to-end tests
+
+`npm run e2e` runs `playwright.config.ts`: chromium only, `e2e/learn.spec.ts` signs in, opens a
+seeded subject, reads part 1 and answers a full round. Two `webServer` entries own the process
+lifecycle - `scripts/e2e-backend.sh` (the API on the fake stack against the local Postgres *test*
+database) and `npm run dev` (the frontend) - both left alone (`reuseExistingServer`) if already
+running outside CI.
+
+One-time setup:
+
+- `npx playwright install chromium` - downloads a browser binary from Microsoft's and Google's
+  CDNs; it needs outbound access to those hosts specifically (a sandbox that only allows the npm
+  registry, for instance, cannot reach them). Without it `npm run e2e` fails to launch the
+  browser rather than skipping.
+- `npm install --save-dev @clerk/testing` - Clerk's own Playwright helpers
+  (`clerkSetup`/`setupClerkTestingToken`), which get a Testing Token so the sign-in form is not
+  blocked by bot protection in a headless browser. Not a committed dependency: the spec imports
+  it dynamically, only once Clerk credentials are configured (see below), so `npm run e2e`
+  without them never needs it installed.
+- Clerk test credentials: a real test user in the same Clerk instance the app is using, plus
+  `CLERK_SECRET_KEY` (already needed for the app itself), `E2E_CLERK_USER_USERNAME` and
+  `E2E_CLERK_USER_PASSWORD` in the environment `npm run e2e` runs in. Without all three the spec
+  reports itself **skipped** (`test.skip`), not failed - this is the expected result in an
+  environment with no Clerk keys at all.
+- `scripts/e2e-backend.sh` reuses the Python venv `api/` is installed into (see "Running the API
+  locally"); set `TEACHME_VENV` if it is not at the default sibling-checkout path. It seeds one
+  small subject (a two-page generated PDF, ingested/generated/published on `LLM_PROVIDER=fake
+  EMBEDDINGS_PROVIDER=fake RERANKER_PROVIDER=noop`) into `DATABASE_URL`'s `teachme_test`
+  database, idempotently - safe to run on its own via `npm run e2e:seed` to check the seed step
+  without starting the server.
+
 `proxy.ts` (Next 16's replacement for `middleware.ts`) runs `clerkMiddleware()` and makes an
 optimistic check on `/learn` and `/admin`. Clerk Core 3 deprecated route-matcher protection
 because path matching can diverge from routing, so each protected page also checks for itself.
