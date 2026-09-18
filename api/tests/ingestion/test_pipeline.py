@@ -211,3 +211,54 @@ def test_resume_from_indexing_rebuilds_chunks_when_the_bundle_lost_them(env):
     # one more contextualize pass: three requests for the 2, 2, 1 page batches
     assert after["ingest.contextualize"] - before["ingest.contextualize"] == 3
     assert deps.search.count(subject.id) == 5
+
+
+def test_run_next_step_performs_one_step_per_call(env):
+    deps, subject, source, _ = env
+    pipeline = IngestionPipeline(deps)
+
+    assert pipeline.run_next_step(source.id) is True
+    assert deps.sources.get(source.id).status == SourceStatus.CHUNKING
+    assert len(deps.pages.list(source.id)) == 5
+
+    assert pipeline.run_next_step(source.id) is True
+    assert deps.sources.get(source.id).status == SourceStatus.INDEXING
+
+    assert pipeline.run_next_step(source.id) is False
+    assert deps.sources.get(source.id).status == SourceStatus.READY
+    assert deps.search.count(subject.id) == 5
+
+
+def test_run_next_step_marks_the_failed_step_and_the_next_call_resumes_it(env):
+    deps, subject, source, fake_llm = env
+    calls = {"n": 0}
+    good = default_responders()[ChunksOut]
+
+    def flaky(request):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("upstream hiccup")
+        return good(request)
+
+    fake_llm.set_responder(ChunksOut, flaky)
+    pipeline = IngestionPipeline(deps)
+    assert pipeline.run_next_step(source.id) is True  # extraction
+    with pytest.raises(RuntimeError, match="upstream hiccup"):
+        pipeline.run_next_step(source.id)
+
+    failed = deps.sources.get(source.id)
+    assert failed.status == SourceStatus.FAILED and failed.resume_status == SourceStatus.CHUNKING
+    read_calls_before = sum(1 for r in fake_llm.calls if r.purpose == "ingest.read_pages")
+
+    assert pipeline.run_next_step(source.id) is True  # resumes at chunking, not at extraction
+    assert pipeline.run_next_step(source.id) is False
+    assert deps.sources.get(source.id).status == SourceStatus.READY
+    assert sum(1 for r in fake_llm.calls if r.purpose == "ingest.read_pages") == read_calls_before
+
+
+def test_run_next_step_refuses_a_published_subject(env):
+    deps, subject, source, _ = env
+    deps.subjects.set_state(subject.id, SubjectState.PUBLISHED)
+    deps.conn.commit()
+    with pytest.raises(SubjectLocked):
+        IngestionPipeline(deps).run_next_step(source.id)

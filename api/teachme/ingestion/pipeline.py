@@ -54,6 +54,22 @@ class IngestionPipeline:
         self.d = deps
 
     def ingest_source(self, source_id: UUID) -> Source:
+        """The whole run, one step at a time, in this process. What the CLI calls."""
+        while self.run_next_step(source_id):
+            pass
+        return self.d.sources.get(source_id)
+
+    def run_next_step(self, source_id: UUID) -> bool:
+        """Exactly one step - extract, chunk or index - starting from the source's own resume
+        point and committed before returning. True means a step is still outstanding, so a runner
+        that gets one function invocation per step re-enqueues itself; False means the source
+        reached READY.
+
+        Failure is handled as it is for a whole run: the transaction is rolled back and the source
+        marked FAILED with the step that failed as its resume_status, so the next call picks up
+        exactly there. Chunks are not handed from the chunking step to the indexing one in memory,
+        because the two may run in different processes - the indexing step reads them back from the
+        bundle the chunking step wrote."""
         source = self.d.sources.get(source_id)
         subject = self.d.subjects.get(source.subject_id)
         if subject.state == SubjectState.PUBLISHED:
@@ -67,14 +83,11 @@ class IngestionPipeline:
                 if step in (SourceStatus.UPLOADED, SourceStatus.EXTRACTING):
                     step = SourceStatus.EXTRACTING
                     self._extract(source, subject, bundle, source_slug)
-                    step = SourceStatus.CHUNKING
-                if step == SourceStatus.CHUNKING:
-                    chunks = self._chunk(source, subject, bundle, source_slug)
-                    step = SourceStatus.INDEXING
+                elif step == SourceStatus.CHUNKING:
+                    self._chunk(source, subject, bundle, source_slug)
                 else:
-                    chunks = None
-                if step == SourceStatus.INDEXING:
-                    self._index(source, subject, bundle, source_slug, chunks)
+                    step = SourceStatus.INDEXING
+                    self._index(source, subject, bundle, source_slug)
             except Exception as exc:
                 log.exception("ingestion of %s failed during %s", source.id, step.value)
                 self.d.conn.rollback()
@@ -83,7 +96,7 @@ class IngestionPipeline:
                 )
                 self.d.conn.commit()
                 raise
-        return self.d.sources.get(source.id)
+        return step != SourceStatus.INDEXING
 
     @staticmethod
     def _resume_point(source: Source) -> SourceStatus:
@@ -139,23 +152,12 @@ class IngestionPipeline:
         self.d.conn.commit()
         return chunks
 
-    def _index(
-        self,
-        source: Source,
-        subject: Subject,
-        bundle: BundleWriter,
-        source_slug: str,
-        chunks: list[Chunk] | None,
-    ) -> None:
+    def _index(self, source: Source, subject: Subject, bundle: BundleWriter, source_slug: str) -> None:
         self.d.sources.set_status(source.id, SourceStatus.INDEXING)
         self.d.conn.commit()
         current = self.d.sources.get(source.id)
-        if chunks is None:
-            reader = BundleReader(self.d.bundle_stores[0], bundle.prefix(source_slug))
-            if not reader.has_chunks():
-                chunks = self._chunk(source, subject, bundle, source_slug)
-            else:
-                chunks = reader.chunks()
+        reader = BundleReader(self.d.bundle_stores[0], bundle.prefix(source_slug))
+        chunks = reader.chunks() if reader.has_chunks() else self._chunk(source, subject, bundle, source_slug)
         records = index_chunks(
             self.d.embedder,
             self.d.search,
