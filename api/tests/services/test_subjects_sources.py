@@ -93,3 +93,13 @@ def test_delete_and_reingest_respect_publish_lock(services):
     subject_service.set_state(subject, SubjectState.DRAFT)
     source_service.delete(source.id)
     assert not files.exists(source.file_key) and source_service.list(subject) == []
+
+
+def test_delete_also_removes_the_source_cached_thumbnails(services):
+    subject_service, source_service, files, _search = services
+    subject = subject_service.get_or_create("Geo")
+    source = source_service.register(subject, "ch1.pdf", make_pdf(2))
+    files.put(f"thumbnails/{source.id}/000-w800.png", b"png-0", "image/png")
+    files.put(f"thumbnails/{source.id}/001-w800.png", b"png-1", "image/png")
+    source_service.delete(source.id)
+    assert files.list_keys(f"thumbnails/{source.id}/") == []

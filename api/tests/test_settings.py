@@ -64,6 +64,18 @@ def test_relevance_thresholds_fall_back_to_the_defaults_per_language(monkeypatch
     assert settings.relevance_thresholds_for("he") == RelevanceThresholds(high=0.4, low=0.1)
 
 
+def test_thumbnail_width_default_and_bounds(monkeypatch):
+    assert Settings(_env_file=None).thumbnail_width == 800
+    monkeypatch.setenv("THUMBNAIL_WIDTH", "1200")
+    assert Settings(_env_file=None).thumbnail_width == 1200
+    monkeypatch.setenv("THUMBNAIL_WIDTH", "10")
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
+    monkeypatch.setenv("THUMBNAIL_WIDTH", "4000")
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
+
+
 def test_rejects_relevance_thresholds_out_of_order(monkeypatch):
     monkeypatch.setenv("RELEVANCE_LOW", "0.9")
     with pytest.raises(ValidationError, match="low <= high"):

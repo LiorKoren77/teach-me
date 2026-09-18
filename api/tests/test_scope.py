@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from uuid import uuid4
+
 import pytest
 from pydantic import BaseModel
 
@@ -16,6 +18,11 @@ def test_container_delegates_to_its_default_scope(db, make_container):
     assert c.subjects is c.scope.subjects
     assert c.pipeline is c.scope.pipeline
     assert c.scope.conn is c.conn
+
+
+def test_thumbnail_service_uses_the_configured_width(db, make_container):
+    c = make_container(thumbnail_width=64)
+    assert c.scope.thumbnail_service.key(uuid4(), 0).endswith("-w64.png")
 
 
 def test_request_scope_uses_pooled_connection_and_usage_rows_are_durable(db, make_container):

@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import SecretStr, field_validator, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from teachme.domain.languages import LANGUAGES
@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     # Rendered subject corpora kept in the per-process cache; a corpus is a whole subject's
     # text, so the cache is capped and evicts the least recently used entry.
     corpus_cache_max_entries: int = 8
+    # Width in pixels a source page is rasterized to for GET .../pages/{index}/image. Part of the
+    # cache key (thumbnails/{source_id}/NNN-w{width}.png), so changing it does not invalidate
+    # images already rendered at the old width - they simply sit alongside the new ones.
+    thumbnail_width: int = Field(default=800, ge=64, le=2400)
 
     # Relevance bands: at or above `high` an answer skips the relevance check, below `low` it is
     # LOW. Both go to the check, so these only move where the cheap model call is spent.

@@ -13,6 +13,7 @@ from teachme.ports.file_store import FileStore
 from teachme.ports.llm import LLMProvider
 from teachme.repositories.sources import SourceRepository
 from teachme.repositories.subjects import SubjectRepository
+from teachme.services.thumbnails import thumbnail_prefix
 from teachme.settings import Settings
 
 _EXTRA_TYPES = {
@@ -93,6 +94,8 @@ class SourceService:
         self._require_draft(self._subjects.get(source.subject_id))
         self._search.delete_by_source(source.id)
         self._files.delete(source.file_key)
+        for key in self._files.list_keys(thumbnail_prefix(source.id)):
+            self._files.delete(key)
         self._sources.delete(source.id)  # pages and figures cascade
         self._conn.commit()
 

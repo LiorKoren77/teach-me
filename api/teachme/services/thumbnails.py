@@ -9,6 +9,12 @@ from teachme.repositories.sources import SourceRepository
 DEFAULT_WIDTH = 800
 
 
+def thumbnail_prefix(source_id: UUID) -> str:
+    """Every thumbnail of one source lives under this prefix, at any width - what SourceService
+    deletes when the source itself is deleted."""
+    return f"thumbnails/{source_id}/"
+
+
 class ThumbnailService:
     """PNG of a source page, rendered on first request and cached in the file store.
 
@@ -22,7 +28,7 @@ class ThumbnailService:
         self._width = width
 
     def key(self, source_id: UUID, page_index: int) -> str:
-        return f"thumbnails/{source_id}/{page_index:03d}-w{self._width}.png"
+        return f"{thumbnail_prefix(source_id)}{page_index:03d}-w{self._width}.png"
 
     def png(self, source_id: UUID, page_index: int) -> bytes:
         """The page as PNG. FileNotFound when there is no image to serve: the source is not a

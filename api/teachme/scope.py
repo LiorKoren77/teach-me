@@ -200,7 +200,7 @@ class Scope:
 
     @cached_property
     def thumbnail_service(self) -> ThumbnailService:
-        return ThumbnailService(self.shared.files, self.sources)
+        return ThumbnailService(self.shared.files, self.sources, width=self.shared.settings.thumbnail_width)
 
     @cached_property
     def learning_service(self) -> LearningService:
