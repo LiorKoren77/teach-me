@@ -106,6 +106,9 @@ class TextResult:
     text: str
     usage: LLMUsage
     model: str
+    truncated: bool = False
+    """The output hit max_tokens. Unlike a structured result, half-written prose is still usable,
+    so the adapter reports it and the caller decides whether to keep it."""
 
 
 class LLMProvider(Protocol):

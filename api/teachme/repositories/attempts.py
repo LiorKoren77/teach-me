@@ -21,7 +21,7 @@ _AQ = (
     "id, attempt_id, question_id, round_no, position, answer_text, answer_choice, relevance_score,"
     " relevance_band, route, check_verdict, grade, rubric_covered, missed_concepts, feedback, rejections"
 )
-_REEXPLANATION = "id, attempt_id, round_no, section_ids, language, body, model"
+_REEXPLANATION = "id, attempt_id, round_no, section_ids, language, body, model, truncated"
 
 
 class AttemptNotFound(NotFound):
@@ -82,6 +82,7 @@ def _reexplanation(row: dict) -> Reexplanation:
         language=row["language"],
         body=row["body"],
         model=row["model"],
+        truncated=row["truncated"],
     )
 
 
@@ -224,11 +225,12 @@ class AttemptRepository:
         language: str,
         body: str,
         model: str,
+        truncated: bool = False,
     ) -> Reexplanation:
         rid = uuid4()
         self._conn.execute(
-            f"INSERT INTO reexplanations ({_REEXPLANATION}) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-            (rid, attempt_id, round_no, list(section_ids), language, body, model),
+            f"INSERT INTO reexplanations ({_REEXPLANATION}) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+            (rid, attempt_id, round_no, list(section_ids), language, body, model, truncated),
         )
         return Reexplanation(
             id=rid,
@@ -238,6 +240,7 @@ class AttemptRepository:
             language=language,
             body=body,
             model=model,
+            truncated=truncated,
         )
 
     def latest_reexplanation(self, attempt_id: UUID) -> Reexplanation | None:

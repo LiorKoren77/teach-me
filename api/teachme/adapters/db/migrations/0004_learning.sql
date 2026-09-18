@@ -69,6 +69,8 @@ CREATE TABLE reexplanations (
   language    text NOT NULL,
   body        text NOT NULL,
   model       text NOT NULL,
+  -- the stream hit max_tokens: the text is kept, and the view can say it stops mid-thought
+  truncated   boolean NOT NULL DEFAULT false,
   created_at  timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX reexplanations_attempt_round_idx ON reexplanations(attempt_id, round_no);

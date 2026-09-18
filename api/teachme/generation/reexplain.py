@@ -59,6 +59,8 @@ def reexplain_sections(
     *,
     on_delta: OnDelta,
 ) -> TextResult:
+    if not sections:
+        raise ValueError("no weak sections to re-explain")
     request = TextRequest(
         purpose="learn.reexplain",
         model=model,

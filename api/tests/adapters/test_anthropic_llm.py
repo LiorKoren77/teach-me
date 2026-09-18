@@ -180,8 +180,7 @@ class _TextStream:
         return self._message
 
 
-def test_stream_text_yields_deltas_then_reports_usage():
-    message = _message()
+def _text_client(message):
     client = _StubClient(message)
 
     def stream(**kwargs):
@@ -189,9 +188,40 @@ def test_stream_text_yields_deltas_then_reports_usage():
         return _TextStream(["Hel", "lo"], message)
 
     client.messages = SimpleNamespace(stream=stream)
-    llm = AnthropicLLM(client=client)
-    request = TextRequest(purpose="t", model="claude-opus-5", system="s", parts=(ContentPart.of_text("x"),))
+    return client
+
+
+def _text_request(**overrides):
+    base = dict(
+        purpose="t", model="claude-opus-5", system="s", parts=(ContentPart.of_text("x"),), max_tokens=6000
+    )
+    return TextRequest(**{**base, **overrides})
+
+
+def test_stream_text_yields_deltas_then_reports_usage():
+    message = _message()
+    client = _text_client(message)
     collected = []
-    result = llm.stream_text(request, on_delta=collected.append)
+    result = AnthropicLLM(client=client).stream_text(_text_request(), on_delta=collected.append)
     assert collected == ["Hel", "lo"] and result.text == "Hello"
-    assert result.usage.input_tokens == 120 and "output_format" not in client.calls[0]
+    assert result.usage.input_tokens == 120 and not result.truncated
+    kwargs = client.calls[0]
+    assert kwargs["model"] == "claude-opus-5" and kwargs["max_tokens"] == 6000
+    assert kwargs["thinking"] == {"type": "adaptive"} and kwargs["output_config"] == {"effort": "medium"}
+    assert kwargs["system"] == [{"type": "text", "text": "s", "cache_control": {"type": "ephemeral"}}]
+    assert kwargs["messages"] == [{"role": "user", "content": [{"type": "text", "text": "x"}]}]
+    assert "output_format" not in kwargs
+
+
+def test_stream_text_reports_truncation_instead_of_raising():
+    """Prose that ran out of budget is still prose the student can read, so the caller decides
+    what to do with it - unlike a structured output, which would not parse."""
+    client = _text_client(_message(stop_reason="max_tokens"))
+    result = AnthropicLLM(client=client).stream_text(_text_request(), on_delta=lambda d: None)
+    assert result.text == "Hello" and result.truncated
+
+
+def test_stream_text_raises_on_a_refusal():
+    client = _text_client(_message(stop_reason="refusal"))
+    with pytest.raises(LLMRefused):
+        AnthropicLLM(client=client).stream_text(_text_request(), on_delta=lambda d: None)

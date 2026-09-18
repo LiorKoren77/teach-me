@@ -20,6 +20,7 @@ from teachme.domain.models import (
     PartStatus,
     Question,
     QuestionKind,
+    Reexplanation,
     RelevanceBand,
     Route,
     Subject,
@@ -343,8 +344,10 @@ class LearningService:
             attempt, subject, progress, accepted=True, grade=result.grade, feedback=result.feedback
         )
 
-    def reexplain(self, user_id: str, attempt_id: UUID, *, on_delta: OnDelta):
-        """The weak sections of the last failed round, explained again and streamed. Cached per round."""
+    def reexplain(self, user_id: str, attempt_id: UUID, *, on_delta: OnDelta) -> Reexplanation | None:
+        """The weak sections of the last failed round, explained again and streamed. Cached per round.
+
+        None when the round left nothing to reinforce: there is no lesson to ask the model for."""
         attempt, subject, progress = self._owned_attempt(user_id, attempt_id)
         if progress.status != PartStatus.REINFORCING:
             raise NotAllowed("re-explanation is available only after a failed round")
@@ -370,6 +373,8 @@ class LearningService:
             for aq in answered
             if (aq.points or 0.0) < 1.0 and bank[aq.question_id].section_id in weak
         ]
+        if not sections:
+            return None  # nothing to reinforce: never ask the model to re-teach an empty list
         terms = self.d.glossary.terms(outline.id)
         translations = {t.term_id: t.term for t in self.d.glossary.translations(outline.id, attempt.language)}
         by_slug = {t.slug: translations.get(t.id, t.source_term) for t in terms}
@@ -396,6 +401,7 @@ class LearningService:
                 language=attempt.language,
                 body=result.text,
                 model=result.model,
+                truncated=result.truncated,
             )
             self.d.conn.commit()
         except Exception:

@@ -114,3 +114,4 @@ def test_recording_llm_records_stream_text():
         on_delta=lambda d: None,
     )
     assert result.text == "abc" and repo.rows[-1].purpose == "learn.reexplain"
+    assert result.truncated is False  # the flag the adapter sets reaches the caller unchanged

@@ -305,8 +305,10 @@ class AttemptQuestion(Frozen):
 class Reexplanation(Frozen):
     id: UUID
     attempt_id: UUID
-    round_no: int
+    round_no: int = Field(ge=0)
     section_ids: tuple[UUID, ...]
     language: str
     body: str
     model: str
+    truncated: bool = False
+    """The stream hit max_tokens: the text is kept, and the view can say it stops mid-thought."""

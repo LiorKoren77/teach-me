@@ -103,7 +103,12 @@ class AnthropicLLM:
             cache_read_tokens=message.usage.cache_read_input_tokens or 0,
             cache_write_tokens=message.usage.cache_creation_input_tokens or 0,
         )
-        return TextResult(text="".join(pieces), usage=usage, model=message.model)
+        return TextResult(
+            text="".join(pieces),
+            usage=usage,
+            model=message.model,
+            truncated=message.stop_reason == "max_tokens",
+        )
 
 
 def _thinking(request: StructuredRequest | TextRequest) -> dict[str, str]:
