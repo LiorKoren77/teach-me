@@ -20,9 +20,14 @@ teachme migrate
 teachme subject create "History ch. 3" --languages he,en
 teachme ingest --subject "History ch. 3" sources/*.pdf
 teachme usage --subject "History ch. 3"
+teachme export --subject "History ch. 3" --out digest-export
+teachme import digest-export/<source-folder> --subject "History ch. 3 copy"
+teachme source delete <source-id>
+teachme source reingest <source-id>
 ```
 
 Set `LLM_PROVIDER=fake EMBEDDINGS_PROVIDER=fake RERANKER_PROVIDER=noop` to run the whole pipeline
 without any API key. `docker-compose.yml` maps the container's Postgres to host port 5433 (a native
 Postgres commonly occupies 5432 on the dev machine). Tests:
 `TEST_DATABASE_URL=postgresql://teachme:teachme@localhost:5433/teachme_test pytest -q`.
+On Vercel, `vercel.json` routes every `/api/*` request to the FastAPI function.
