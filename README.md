@@ -194,9 +194,10 @@ without it every token is treated as a student, since a missing `role` claim fal
 | GET | `/api/subjects/{subject_id}/pages/{global_index}/image` | student | PNG of one page of a published subject's material, by the global page index its teaching text refers to. Rendered from the PDF on first request and cached in the file store under `thumbnails/{source_id}/NNN-w{width}.png`, so a page is rasterized at most once. |
 | GET | `/api/admin/subjects` | admin | List every subject regardless of publication state. |
 | GET | `/api/admin/subjects/{subject_id}/sources` | admin | List a subject's ingested sources and their status. |
+| GET | `/api/admin/actions` | admin | The admin audit trail, newest first: every upload, delete, reingest, generate, publish and unpublish with the admin who made it. Optional `subject_id` filter and `limit` (1-200, default 50). |
 | GET | `/api/admin/usage` | admin | Model/embedding usage and cost summary, optionally filtered by `subject_id`. |
 | GET | `/api/admin/capabilities` | admin | What the file picker may offer: the media types this deployment's LLM adapter can read (narrowed by `ALLOWED_UPLOAD_TYPES`) and `MAX_UPLOAD_BYTES`. |
-| POST | `/api/admin/subjects/{subject_id}/sources` | admin | Upload one file (multipart field `file`) to a draft subject: registers it and queues its ingestion. Answers with the source plus the `job_id`. `415` for a type that cannot be read, `413` for a body over `MAX_UPLOAD_BYTES`, `409` when the subject is published. |
+| POST | `/api/admin/subjects/{subject_id}/sources` | admin | Upload one file (multipart field `file`) to a draft subject: registers it and queues its ingestion. Answers with the source plus the `job_id`. `415` for a type that cannot be read, `413` for a body over `MAX_UPLOAD_BYTES`, `409` when the subject is published, `429` past `MAX_UPLOADS_PER_HOUR` for this admin. |
 | DELETE | `/api/admin/sources/{source_id}` | admin | Remove a source, its pages, figures, chunks, thumbnails and file. `204` with no body; `409` when the subject is published. |
 | POST | `/api/admin/sources/{source_id}/reingest` | admin | Re-run a source through the pipeline from the start; answers with the `job_id`. |
 | GET | `/api/admin/jobs/{job_id}` | admin | One job's `kind`, `status` (`queued`/`running`/`done`/`failed`), `attempts` and `error` - what the upload pane polls. |
@@ -230,6 +231,17 @@ sources stay visible. The response carries the registered source and the `job_id
 because ingestion is resumable and behind the `vercel_function` runner takes several jobs to
 finish. Generate, publish and unpublish are the same `TutorialService` calls `teachme tutorial`
 makes, and `.../status` prints the same numbers `teachme tutorial status` does.
+
+### Admin audit trail
+
+Every admin write - upload, delete, reingest, generate, publish, unpublish - records one
+`admin_actions` row (`user_id`, `action`, `subject_id`, `source_id`, a `detail` JSON blob and
+`created_at`), readable through `GET /api/admin/actions`. The row is written on the connection
+the action itself runs on, so the two are committed together and a refusal rolls the record back
+with the change it would have described - the trail never claims something happened that did not.
+The table has no foreign keys, because a delete is exactly the action whose record must outlive
+its subject. It is also the only record of who uploaded what (`jobs` rows carry no actor), which
+is what `MAX_UPLOADS_PER_HOUR` is counted from.
 
 ### Background jobs
 
@@ -297,6 +309,7 @@ wins when one refusal subclasses another):
 | 404 | `NotFound` | The subject, source, attempt, question or other resource does not exist. |
 | 403 | `NotAllowed` | The caller does not own the attempt, the part is locked, the language is not one the subject teaches *and* this deployment enables (`ENABLED_LANGUAGES`), or (via `require_role`) the caller's role does not permit an admin route. |
 | 429 | `RateLimited` | A `NotAllowed` subclass: the caller submitted more answers/rejections than `MAX_ANSWERS_PER_MINUTE` allows in the last minute. |
+| 429 | `TooManyUploads` | This admin has uploaded `MAX_UPLOADS_PER_HOUR` sources in the last hour, counted from the `admin_actions` trail. |
 | 409 | `LearningError` (and `IllegalTransition`, `GenerationError`, `SubjectLocked`) | A state-machine refusal - e.g. re-explaining outside `REINFORCING`, an illegal part-status transition, or a subject locked against generation/ingestion. |
 | 409 | `QuestionClosed` | A `LearningError` subclass: the question is not open for answering - it already carries a grade, or it belongs to another attempt. A conflict with the state of the round, which is why it is not the `403` a foreign attempt gets. |
 | 409 | `InvalidChoice` | A `LearningError` subclass: a multiple-choice submission that is not one of the question's options - no choice at all, or an index past the last one (the route refuses a negative index as a `422`). |
@@ -398,6 +411,8 @@ New settings from `api/teachme/settings.py` (env names as in `.env.example`):
 - `REINFORCE_SECTIONS_CAP` (`reinforce_sections_cap`) - maximum number of weak sections covered by one re-explanation.
 - `CORPUS_CACHE_MAX_ENTRIES` (`corpus_cache_max_entries`) - rendered subject corpora kept in the per-process cache before the least recently used one is evicted (section vocabularies get a multiple of this). Loading is locked per key, so rendering one subject's corpus never blocks a request for another.
 - `THUMBNAIL_WIDTH` (`thumbnail_width`, 64-2400) - width in pixels a source page is rasterized to for `GET .../pages/{index}/image`. Part of the cache key (`thumbnails/{source_id}/NNN-w{width}.png`), so changing it does not invalidate images already cached at the old width.
+- `MAX_UPLOADS_PER_HOUR` (`max_uploads_per_hour`, default 20) - how many sources one admin may
+  upload per hour, counted from the `admin_actions` trail; the next one is a `429`.
 - `RELEVANCE_HIGH` / `RELEVANCE_LOW` (`relevance_high` / `relevance_low`) - lexical relevance-score thresholds: at or above `high` an answer skips the model check; below `low` it is `LOW`.
 - `RELEVANCE_THRESHOLDS` (`relevance_thresholds`) - per-language JSON overrides of the two thresholds above (the lexical score is not equally generous in every language).
 - `CLERK_JWKS_URL` (`clerk_jwks_url`) - Clerk's JWKS endpoint; unset means no auth guard is built and every authenticated route answers `503`.

@@ -13,6 +13,7 @@ from teachme.adapters.db.engine import connect
 from teachme.adapters.job_runner.inprocess import InProcessJobRunner
 from teachme.ingestion.pipeline import INGEST_SOURCE, IngestionPipeline, PipelineDeps
 from teachme.ports.job_runner import JobHandler, JobPayload, JobRunner
+from teachme.repositories.admin_actions import AdminActionRepository
 from teachme.repositories.attempts import AttemptRepository
 from teachme.repositories.content import ContentRepository
 from teachme.repositories.figures import FigureRepository
@@ -69,6 +70,10 @@ class Scope:
     @cached_property
     def figures(self) -> FigureRepository:
         return FigureRepository(self.conn)
+
+    @cached_property
+    def admin_actions(self) -> AdminActionRepository:
+        return AdminActionRepository(self.conn)
 
     @cached_property
     def jobs(self) -> JobRepository:

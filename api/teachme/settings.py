@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     # a middleware before the body is read; a chunked body is measured once the form is parsed.
     # Vercel itself refuses a request body over 100 MB, so this can only narrow that.
     max_upload_bytes: int = 50 * 1024 * 1024
+    # How many sources one admin may upload per hour, counted from the audit trail. A cap per
+    # admin rather than per deployment: it is there to bound what one account can spend on
+    # ingestion by mistake (a folder dropped on the file picker), not to ration the team.
+    max_uploads_per_hour: int = 20
     pages_per_read_batch: int = 6
     pages_per_chunk_batch: int = 6
     # How long a job may sit `running` before the sweep calls its invocation dead and marks it

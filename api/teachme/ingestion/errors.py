@@ -17,6 +17,10 @@ class UploadTooLarge(IngestionError):
     pass
 
 
+class TooManyUploads(IngestionError):
+    """This admin has uploaded more than MAX_UPLOADS_PER_HOUR sources in the last hour."""
+
+
 class ExtractionError(IngestionError):
     pass
 

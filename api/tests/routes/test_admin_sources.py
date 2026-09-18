@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from uuid import uuid4
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -213,3 +215,94 @@ def test_generate_is_refused_before_a_job_exists_when_nothing_is_ready(make_admi
     assert response.status_code == 409 and "no sources" in response.json()["detail"]
     with container.pool.connection() as conn:
         assert conn.execute("SELECT count(*) AS n FROM jobs").fetchone()["n"] == 0
+
+
+# the audit trail and the upload cap -------------------------------------------------------------
+
+
+def seed_uploads(container, *, user_id: str, count: int) -> None:
+    """Upload actions this admin has already made, without paying for the uploads themselves."""
+    from teachme.repositories.admin_actions import AdminActionRepository
+
+    with container.pool.connection() as conn:
+        actions = AdminActionRepository(conn)
+        for _ in range(count):
+            actions.record(user_id=user_id, action="upload")
+        conn.commit()
+
+
+def test_every_write_route_leaves_an_audit_row_naming_the_admin(make_admin):
+    client, _, subject, _ = make_admin(sources=[("ch1.pdf", make_pdf(4))])
+    subject_path = f"/api/admin/subjects/{subject.id}"
+    source_id = upload(client, subject).json()["id"]
+    assert client.post(f"/api/admin/sources/{source_id}/reingest").status_code == 200
+    assert client.post(f"{subject_path}/generate").status_code == 200
+    assert client.post(f"{subject_path}/publish").status_code == 200
+    assert client.post(f"{subject_path}/unpublish").status_code == 200
+    assert client.delete(f"/api/admin/sources/{source_id}").status_code == 204
+
+    rows = client.get("/api/admin/actions").json()
+    assert [row["action"] for row in rows] == [
+        "delete",
+        "unpublish",
+        "publish",
+        "generate",
+        "reingest",
+        "upload",
+    ]
+    assert {row["user_id"] for row in rows} == {"admin_1"}
+    assert {row["subject_id"] for row in rows} == {str(subject.id)}
+    uploaded = rows[-1]
+    assert uploaded["source_id"] == source_id and uploaded["detail"]["filename"] == "ch1.pdf"
+
+
+def test_a_refused_action_is_not_audited(make_admin):
+    """The row is written on the connection the action runs on, so a refusal takes it with it:
+    an audit trail that recorded attempts would say a published subject had been changed."""
+    client, _, subject, _ = make_admin(sources=[("ch1.pdf", make_pdf(4))], publish=True)
+    source_id = client.get(f"/api/admin/subjects/{subject.id}/sources").json()[0]["id"]
+    assert client.post(f"/api/admin/sources/{source_id}/reingest").status_code == 409
+    assert client.get("/api/admin/actions").json() == []
+
+
+def test_the_action_listing_filters_by_subject_and_limits(make_admin):
+    client, container, subject, _ = make_admin()
+    upload(client, subject)
+    with container.pool.connection() as conn:
+        from teachme.repositories.admin_actions import AdminActionRepository
+
+        AdminActionRepository(conn).record(user_id="admin_2", action="publish", subject_id=uuid4())
+        conn.commit()
+
+    assert len(client.get("/api/admin/actions").json()) == 2
+    mine = client.get(f"/api/admin/actions?subject_id={subject.id}").json()
+    assert [row["action"] for row in mine] == ["upload"]
+    assert len(client.get("/api/admin/actions?limit=1").json()) == 1
+
+
+def test_the_twenty_first_upload_in_an_hour_is_refused(make_admin):
+    client, container, subject, _ = make_admin()
+    seed_uploads(container, user_id="admin_1", count=20)
+
+    response = upload(client, subject)
+    assert response.status_code == 429, response.text
+    assert set(response.json()) == {"detail"} and "20" in response.json()["detail"]
+    assert client.get(f"/api/admin/subjects/{subject.id}/sources").json() == []
+
+
+def test_another_admins_uploads_do_not_count_against_this_one(make_admin):
+    client, container, subject, _ = make_admin()
+    seed_uploads(container, user_id="admin_2", count=20)
+    assert upload(client, subject).status_code == 200
+
+
+def test_the_cap_is_configurable(make_admin):
+    client, _, subject, _ = make_admin(max_uploads_per_hour=1)
+    assert upload(client, subject).status_code == 200
+    assert upload(client, subject).status_code == 429
+
+
+def test_a_student_is_refused_the_action_listing(make_admin):
+    client, _, _, user = make_admin()
+    user["role"] = "student"
+    assert client.get("/api/admin/actions").status_code == 403

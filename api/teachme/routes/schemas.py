@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
 from teachme.domain.models import Source, Subject
+from teachme.repositories.admin_actions import AdminActionRow
 from teachme.services.tutorial import TutorialStatus
 
 
@@ -181,3 +184,19 @@ class AdminSubjectStatus(BaseModel):
             publishable=status.publishable,
             publishable_version=status.publishable_version,
         )
+
+
+class AdminAction(BaseModel):
+    """One line of the admin audit trail: who did what to which subject, and when."""
+
+    id: UUID
+    user_id: str
+    action: str
+    subject_id: UUID | None
+    source_id: UUID | None
+    detail: dict[str, Any]
+    created_at: datetime
+
+    @classmethod
+    def of(cls, row: AdminActionRow) -> AdminAction:
+        return cls(**vars(row))

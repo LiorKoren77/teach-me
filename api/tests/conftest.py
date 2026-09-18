@@ -11,6 +11,7 @@ from teachme.container import Container
 from teachme.settings import Settings
 
 TABLES = [
+    "admin_actions",
     "reexplanations",
     "attempt_questions",
     "attempts",

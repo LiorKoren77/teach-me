@@ -6,7 +6,12 @@ from fastapi.responses import JSONResponse
 from teachme.domain.assessment.scoring import UnmappedQuestion
 from teachme.domain.assessment.transitions import IllegalTransition
 from teachme.generation.errors import GenerationError
-from teachme.ingestion.errors import SubjectLocked, UnsupportedMediaType, UploadTooLarge
+from teachme.ingestion.errors import (
+    SubjectLocked,
+    TooManyUploads,
+    UnsupportedMediaType,
+    UploadTooLarge,
+)
 from teachme.ports.job_runner import UnknownJobKind
 from teachme.repositories.errors import NotFound
 from teachme.routes.schemas import ErrorResponse
@@ -24,6 +29,7 @@ STATUS_BY_ERROR: tuple[tuple[int, type[Exception]], ...] = (
     (409, UnmappedQuestion),
     (409, GenerationError),
     (409, SubjectLocked),
+    (429, TooManyUploads),
     (413, UploadTooLarge),
     (415, UnsupportedMediaType),
 )
