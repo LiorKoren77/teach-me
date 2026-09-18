@@ -50,4 +50,5 @@ __pycache__/
 # ingestion inputs and local digest bundles (large, and exportable on demand)
 sources/
 digest/
+data/
 *.egg-info/
