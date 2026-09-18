@@ -16,9 +16,13 @@ def test_tokenize_keeps_numbers_and_short_words():
     assert tokenize("In 1789 the map", "en") == ["1789", "map"]
 
 
-def test_tokenize_hebrew_strips_one_prefix_from_long_words():
-    # והביוספרה -> strip ו -> הביוספרה (one prefix only, deterministic)
-    assert tokenize("והביוספרה", "he") == ["הביוספרה"]
+def test_tokenize_hebrew_keeps_bare_and_prefixed_forms_overlapping():
+    # Different prefixed forms of the same word must share at least one token so they match at query time.
+    bare = set(tokenize("ביוספרה", "he"))
+    prefixed = set(tokenize("והביוספרה", "he"))
+    assert bare & prefixed
+    assert "ביוספרה" in bare
+    assert "ביוספרה" in prefixed
     # short words are left alone so real words like "הר" are not mangled
     assert tokenize("הר", "he") == ["הר"]
 

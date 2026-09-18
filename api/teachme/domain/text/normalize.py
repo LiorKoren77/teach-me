@@ -8,6 +8,8 @@ from teachme.domain.languages import LANGUAGES
 _HEBREW_POINTS = re.compile(r"[֑-ׇ]")  # niqqud and cantillation marks
 _WORD = re.compile(r"\w+", re.UNICODE)
 _MIN_LEN_FOR_PREFIX_STRIP = 4
+_MIN_LEN_AFTER_STRIP = 3
+_MAX_PREFIX_STRIPS = 2
 
 
 def normalize(text: str) -> str:
@@ -27,16 +29,27 @@ def tokenize(text: str, language_code: str) -> list[str]:
     prefixes = language.prefixes if language else ()
     tokens: list[str] = []
     for raw in _WORD.findall(normalize(text)):
-        if raw in stopwords:
-            continue
-        token = _strip_prefix(raw, prefixes)
-        if token in stopwords:
-            continue
-        tokens.append(token)
+        for variant in _prefix_variants(raw, prefixes):
+            if variant in stopwords:
+                continue
+            tokens.append(variant)
     return tokens
 
 
-def _strip_prefix(token: str, prefixes: tuple[str, ...]) -> str:
-    if len(token) >= _MIN_LEN_FOR_PREFIX_STRIP and token[0] in prefixes:
-        return token[1:]
-    return token
+def _prefix_variants(token: str, prefixes: tuple[str, ...]) -> list[str]:
+    """The raw token plus up to two progressive one-letter clitic strips.
+
+    Hebrew clitics (ו ה ב ל מ ש כ) stack at the front of a word, so the same underlying
+    word can appear as e.g. ביוספרה, הביוספרה, or והביוספרה. Emitting every prefix-stripped
+    form as a token lets those variants share a token for lexical matching.
+    """
+    variants = [token]
+    remainder = token
+    for _ in range(_MAX_PREFIX_STRIPS):
+        if len(remainder) < _MIN_LEN_FOR_PREFIX_STRIP or remainder[0] not in prefixes:
+            break
+        remainder = remainder[1:]
+        if len(remainder) < _MIN_LEN_AFTER_STRIP:
+            break
+        variants.append(remainder)
+    return variants
