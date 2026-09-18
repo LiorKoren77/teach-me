@@ -16,7 +16,9 @@ class SqsJobRunner:
 
     name = "sqs"
 
-    def __init__(self, queue_url: str, region: str, jobs: JobRepository | None, client: Any | None = None) -> None:
+    def __init__(
+        self, queue_url: str, region: str, jobs: JobRepository | None, client: Any | None = None
+    ) -> None:
         self._queue_url = queue_url
         self._jobs = jobs
         self._client = client or boto3.client("sqs", region_name=region)

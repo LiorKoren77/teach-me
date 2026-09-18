@@ -39,14 +39,23 @@ class PgVectorChunkSearch:
                 "INSERT INTO chunks (id, source_id, subject_id, context, text, page_start, page_end,"
                 " embedding, embedding_model, tokens)"
                 " VALUES (%s, %s, %s, %s, %s, %s, %s, %s::vector, %s, to_tsvector('simple', %s))"
-                " ON CONFLICT (id) DO UPDATE SET source_id = EXCLUDED.source_id, subject_id = EXCLUDED.subject_id,"
+                " ON CONFLICT (id) DO UPDATE SET source_id = EXCLUDED.source_id,"
+                " subject_id = EXCLUDED.subject_id,"
                 " context = EXCLUDED.context, text = EXCLUDED.text, page_start = EXCLUDED.page_start,"
                 " page_end = EXCLUDED.page_end, embedding = EXCLUDED.embedding,"
                 " embedding_model = EXCLUDED.embedding_model, tokens = EXCLUDED.tokens",
                 [
                     (
-                        r.id, r.source_id, r.subject_id, r.chunk.context, r.chunk.text, r.chunk.page_start,
-                        r.chunk.page_end, vector_literal(r.embedding), r.embedding_model, " ".join(r.tokens),
+                        r.id,
+                        r.source_id,
+                        r.subject_id,
+                        r.chunk.context,
+                        r.chunk.text,
+                        r.chunk.page_start,
+                        r.chunk.page_end,
+                        vector_literal(r.embedding),
+                        r.embedding_model,
+                        " ".join(r.tokens),
                     )
                     for r in records
                 ],
@@ -64,18 +73,26 @@ class PgVectorChunkSearch:
         ).fetchall()
         return [
             ChunkRecord(
-                id=row["id"], source_id=row["source_id"], subject_id=row["subject_id"],
+                id=row["id"],
+                source_id=row["source_id"],
+                subject_id=row["subject_id"],
                 chunk=Chunk(
-                    context=row["context"], text=row["text"], page_start=row["page_start"], page_end=row["page_end"]
+                    context=row["context"],
+                    text=row["text"],
+                    page_start=row["page_start"],
+                    page_end=row["page_end"],
                 ),
-                embedding=parse_vector(row["embedding"]), embedding_model=row["embedding_model"],
+                embedding=parse_vector(row["embedding"]),
+                embedding_model=row["embedding_model"],
                 tokens=tuple(row["tokens"].split()) if row["tokens"] else (),
             )
             for row in rows
         ]
 
     def count(self, subject_id: UUID) -> int:
-        row = self._conn.execute("SELECT count(*) AS n FROM chunks WHERE subject_id = %s", (subject_id,)).fetchone()
+        row = self._conn.execute(
+            "SELECT count(*) AS n FROM chunks WHERE subject_id = %s", (subject_id,)
+        ).fetchone()
         return int(row["n"])
 
     def dense(self, subject_id: UUID, vector: Sequence[float], k: int) -> list[ChunkHit]:
@@ -102,6 +119,10 @@ class PgVectorChunkSearch:
 
 def _row_to_hit(row: dict) -> ChunkHit:
     return ChunkHit(
-        chunk_id=row["id"], source_id=row["source_id"], content=f"{row['context']}\n\n{row['text']}",
-        page_start=row["page_start"], page_end=row["page_end"], score=float(row["score"]),
+        chunk_id=row["id"],
+        source_id=row["source_id"],
+        content=f"{row['context']}\n\n{row['text']}",
+        page_start=row["page_start"],
+        page_end=row["page_end"],
+        score=float(row["score"]),
     )

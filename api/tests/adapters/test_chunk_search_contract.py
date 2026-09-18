@@ -42,9 +42,13 @@ def search_env(request):
 
 def _record(subject_id, source_id, text, tokens, embedding):
     return ChunkRecord(
-        id=uuid4(), source_id=source_id, subject_id=subject_id,
+        id=uuid4(),
+        source_id=source_id,
+        subject_id=subject_id,
         chunk=Chunk(context="ctx", text=text, page_start=0, page_end=1),
-        embedding=embedding, embedding_model="fake-embed", tokens=tuple(tokens),
+        embedding=embedding,
+        embedding_model="fake-embed",
+        tokens=tuple(tokens),
     )
 
 
@@ -57,7 +61,9 @@ def test_upsert_dense_lexical_delete(search_env):
     search, subject_id, source_id, other_source = search_env
     r1 = _record(subject_id, source_id, "the biosphere", ["biosphere"], _unit(0))
     r2 = _record(subject_id, source_id, "the atmosphere", ["atmosphere"], _unit(1))
-    r3 = _record(subject_id, other_source, "biosphere and atmosphere", ["biosphere", "atmosphere"], _mix(0, 1))
+    r3 = _record(
+        subject_id, other_source, "biosphere and atmosphere", ["biosphere", "atmosphere"], _mix(0, 1)
+    )
     search.upsert([r1, r2, r3])
     assert search.count(subject_id) == 3
 
@@ -83,9 +89,13 @@ def test_upsert_is_idempotent_on_id(search_env):
     record = _record(subject_id, source_id, "v1", ["v1"], _unit(2))
     search.upsert([record])
     updated = ChunkRecord(
-        id=record.id, source_id=source_id, subject_id=subject_id,
+        id=record.id,
+        source_id=source_id,
+        subject_id=subject_id,
         chunk=Chunk(context="ctx", text="v2", page_start=0, page_end=0),
-        embedding=_unit(3), embedding_model="fake-embed", tokens=("v2",),
+        embedding=_unit(3),
+        embedding_model="fake-embed",
+        tokens=("v2",),
     )
     search.upsert([updated])
     assert search.count(subject_id) == 1

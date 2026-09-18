@@ -20,7 +20,9 @@ class InMemoryChunkSearch:
     def upsert(self, records: Sequence[ChunkRecord]) -> None:
         for record in records:
             if len(record.embedding) != self._dimension:
-                raise ValueError(f"embedding has {len(record.embedding)} dims, store expects {self._dimension}")
+                raise ValueError(
+                    f"embedding has {len(record.embedding)} dims, store expects {self._dimension}"
+                )
             self._records[record.id] = record
 
     def delete_by_source(self, source_id: UUID) -> None:
@@ -63,6 +65,10 @@ def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
 
 def _hit(record: ChunkRecord, score: float) -> ChunkHit:
     return ChunkHit(
-        chunk_id=record.id, source_id=record.source_id, content=record.chunk.content,
-        page_start=record.chunk.page_start, page_end=record.chunk.page_end, score=score,
+        chunk_id=record.id,
+        source_id=record.source_id,
+        content=record.chunk.content,
+        page_start=record.chunk.page_start,
+        page_end=record.chunk.page_end,
+        score=score,
     )
