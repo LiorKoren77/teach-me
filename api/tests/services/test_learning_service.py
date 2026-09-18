@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from uuid import uuid4
+
 import pytest
 
 from teachme.container import Container
-from teachme.domain.models import Grade, PartStatus, QuestionKind
+from teachme.domain.models import Grade, PartStatus, Question, QuestionKind, Route
 from teachme.grading.grader import GradeOut
 from teachme.grading.relevance_check import RelevanceVerdict
 from teachme.services.learning import LearningError, NotAllowed
@@ -142,7 +144,7 @@ def test_stall_after_max_rounds_then_retry(env):
     assert retry.status == PartStatus.LEARNING and retry.attempt_id != session.attempt_id
 
 
-def test_relevance_routing_junk_offtopic_and_multiple_choice(env):
+def test_relevance_routing_rejects_junk_and_off_topic_answers(env):
     c, subject, fake = env
     fake.set_responder(GradeOut, _grade("correct"))
     fake.set_responder(RelevanceVerdict, lambda req: RelevanceVerdict(verdict="off_topic"))
@@ -166,24 +168,60 @@ def test_relevance_routing_junk_offtopic_and_multiple_choice(env):
     assert recorded.route.value == "check" and recorded.check_verdict == "off_topic"
     assert recorded.rejections == 2
 
-    # a clearly on-topic answer skips the check and goes to the grader
+    # a clearly on-topic answer skips the rejection path and reaches the grader
     fake.set_responder(RelevanceVerdict, lambda req: RelevanceVerdict(verdict="on_topic"))
-    nxt = off.next_question
-    while nxt is not None and nxt.kind != QuestionKind.MULTIPLE_CHOICE:
-        res = c.learning_service.submit_answer(
-            USER,
-            session.attempt_id,
-            nxt.attempt_question_id,
-            answer_text="Fake teaching sentence about the topic with fake words",
-        )
-        nxt = res.next_question
-    if nxt is not None:
-        res = c.learning_service.submit_answer(
-            USER, session.attempt_id, nxt.attempt_question_id, answer_choice=0
-        )
-        assert res.grade in (Grade.CORRECT, Grade.INCORRECT) and res.accepted
-        mc = c.attempts.get_question(nxt.attempt_question_id)
-        assert mc.route.value == "code"
+    res = c.learning_service.submit_answer(
+        USER,
+        session.attempt_id,
+        off.next_question.attempt_question_id,
+        answer_text="Fake teaching sentence about the topic with fake words",
+    )
+    assert res.accepted and res.grade == Grade.CORRECT
+
+
+def test_multiple_choice_is_graded_in_code_without_a_model_call(env):
+    """The round is made of exactly one multiple-choice question, so the path is reached every
+    run instead of only when the sampler happens to draw the bank's single choice question."""
+    c, subject, fake = env
+    session = c.learning_service.start_part(USER, subject, position=0, language="en")
+    part_id = c.attempts.get(session.attempt_id).part_id
+    section = c.outlines.sections(part_id)[0]
+    slug = c.glossary.terms(c.outlines.get(c.outlines.get_part(part_id).outline_id).id)[0].slug
+    c.questions.replace_for_part(
+        part_id,
+        "en",
+        [
+            Question(
+                id=uuid4(),
+                section_id=section.id,
+                language="en",
+                kind=QuestionKind.MULTIPLE_CHOICE,
+                prompt="Which layer absorbs it?",
+                expected_answer="B",
+                rubric=("names the layer",),
+                key_terms=(),
+                exact_values=(),
+                choices=("A", f"the {{{{term:{slug}|chosen layer}}}}", "C", "D"),
+                correct_choice=1,
+                position=0,
+            )
+        ],
+    )
+    c.conn.commit()
+
+    calls_before = len(fake.calls)
+    question = c.learning_service.begin_round(USER, session.attempt_id)
+    assert question.kind == QuestionKind.MULTIPLE_CHOICE and question.total_in_round == 1
+    assert question.choices == ("A", "the chosen layer", "C", "D")  # placeholders rendered
+
+    result = c.learning_service.submit_answer(
+        USER, session.attempt_id, question.attempt_question_id, answer_choice=0
+    )
+    assert result.accepted and result.grade == Grade.INCORRECT
+    assert result.round_result is not None and result.round_result.score == 0.0
+    recorded = c.attempts.get_question(question.attempt_question_id)
+    assert recorded.route == Route.CODE and recorded.answer_choice == 0 and recorded.answer_text is None
+    assert len(fake.calls) == calls_before  # grading a choice never reaches a model
 
 
 def test_ownership_and_rate_limit(env):
