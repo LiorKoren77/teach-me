@@ -6,6 +6,8 @@ import psycopg
 
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 
+_ADVISORY_LOCK_KEY = 7241965
+
 
 class SchemaOutOfDate(Exception):
     def __init__(self, pending: list[str]) -> None:
@@ -46,7 +48,12 @@ def pending_versions(conn: psycopg.Connection) -> list[str]:
 
 
 def apply_migrations(conn: psycopg.Connection) -> list[str]:
-    """Apply every pending migration in filename order, one transaction each."""
+    """Apply every pending migration in filename order, one transaction each.
+
+    An advisory lock serializes concurrent appliers so two processes racing to
+    migrate the same database don't both try to run the same migration.
+    """
+    conn.execute("SELECT pg_advisory_xact_lock(%s)", (_ADVISORY_LOCK_KEY,))
     _ensure_migrations_table(conn)
     conn.commit()
 

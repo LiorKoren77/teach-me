@@ -5,6 +5,7 @@ from uuid import uuid4
 from teachme.adapters.db.engine import connect
 from teachme.adapters.db.migrate import (
     applied_versions,
+    apply_migrations,
     available_versions,
     ensure_schema_current,
     pending_versions,
@@ -74,4 +75,21 @@ def test_applied_versions_and_pending_versions_are_read_only(migrated_database):
                 (version,),
             )
         conn.commit()
+        conn.close()
+
+
+def test_apply_migrations_takes_an_advisory_lock(migrated_database):
+    conn = connect(migrated_database)
+    executed: list[str] = []
+    real_execute = conn.execute
+
+    def spy_execute(query, *args, **kwargs):
+        executed.append(query)
+        return real_execute(query, *args, **kwargs)
+
+    conn.execute = spy_execute
+    try:
+        assert apply_migrations(conn) == []
+        assert any("pg_advisory_xact_lock" in query for query in executed)
+    finally:
         conn.close()
