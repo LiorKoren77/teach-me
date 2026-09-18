@@ -79,9 +79,7 @@ def subject_list() -> None:
 
 @app.command()
 def ingest(
-    files: list[Path] = typer.Argument(  # noqa: B008 (typer builds the default at import time)
-        ..., exists=True, readable=True, help="PDF, image or text files"
-    ),
+    files: list[Path] = typer.Argument(..., exists=True, readable=True, help="PDF, image or text files"),
     subject: str = typer.Option(..., "--subject", "-s", help="Subject name; created if missing"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the cost confirmation"),
 ) -> None:
@@ -153,7 +151,7 @@ def source_reingest(source_id: UUID, yes: bool = typer.Option(False, "--yes", "-
 @app.command()
 def export(
     subject: str = typer.Option(..., "--subject", "-s"),
-    out: Path = typer.Option(Path("digest-export"), "--out", "-o"),  # noqa: B008
+    out: Path = typer.Option(Path("digest-export"), "--out", "-o"),
 ) -> None:
     """Write every source of a subject as a digest bundle under OUT."""
     c = build_container()
@@ -166,7 +164,7 @@ def export(
 
 @app.command("import")
 def import_bundle(
-    bundle_dir: Path = typer.Argument(..., exists=True, file_okay=False),  # noqa: B008
+    bundle_dir: Path = typer.Argument(..., exists=True, file_okay=False),
     subject: str = typer.Option(..., "--subject", "-s", help="Target subject; created if missing"),
 ) -> None:
     """Load one source bundle folder (the folder containing meta.json) into a subject."""
