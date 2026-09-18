@@ -24,7 +24,19 @@ teachme export --subject "History ch. 3" --out digest-export
 teachme import digest-export/<source-folder> --subject "History ch. 3 copy"
 teachme source delete <source-id>
 teachme source reingest <source-id>
+teachme generate --subject "History ch. 3"            # outline, glossary, teaching text, questions, all languages
+teachme tutorial status --subject "History ch. 3"
+teachme tutorial show --subject "History ch. 3" --language he --part 0
+teachme publish --subject "History ch. 3"             # locks sources, students can see it
 ```
+
+`generate --content-only` keeps the current outline and glossary and only regenerates teaching
+text and questions; `generate --part N` (repeatable) regenerates just those part positions,
+reusing the current outline version. `publish` picks the newest complete outline version (every
+enabled language fully generated). `tutorial show --draft` renders the latest version whether or
+not it has been published, instead of the published one. The subject digest bundle is written
+under `digest/<subject slug>/v<outline version>/`: `outline.json`, `glossary.json`,
+`glossary.<lang>.json`, `parts/NN.<lang>.md`, `questions.<lang>.jsonl`.
 
 Set `LLM_PROVIDER=fake EMBEDDINGS_PROVIDER=fake RERANKER_PROVIDER=noop` to run the whole pipeline
 without any API key. `docker-compose.yml` maps the container's Postgres to host port 5433 (a native

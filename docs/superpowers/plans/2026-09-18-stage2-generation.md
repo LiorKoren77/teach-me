@@ -3362,3 +3362,22 @@ git checkout main && git merge --ff-only stage-2-generation && git push origin m
 - Cached prompt prefix so all languages in one run share the corpus: Task 3.
 - Placeholder rendering rules and gloss frequency setting: Task 4, wired in Task 12 through `subject.gloss_frequency`.
 - Deferred to stage 3 by design: `reexplain` prompt and module, the progress reset listener (hook provided in Task 12), retrieval tool for the grader.
+
+## Deviations recorded during execution
+
+- The subject digest bundle is versioned under `v<N>/`, and `SubjectBundleWriter` takes an
+  `outline_version` so a draft regeneration never overwrites the files students are being taught
+  from.
+- Per-part regeneration (`generate --part`) reuses the current outline version; unknown part
+  positions are rejected rather than silently ignored.
+- `publish` selects the newest complete outline version (every enabled language fully generated),
+  not necessarily the latest one created.
+- `tutorial status` reports per-part readiness and lists failed parts per language, not just an
+  overall complete/incomplete flag.
+- Migration `0003_gloss_frequency_check.sql` was added during stage 2, shifting the stage 3 and
+  stage 5 plans' migration numbers up by one (`0003_learning.sql` -> `0004_learning.sql`,
+  `0004_admin_actions.sql` -> `0005_admin_actions.sql`).
+- CLI commands share the `_run()` operator-error helper instead of each command handling
+  `Container` setup, teardown and operator-facing error reporting on its own.
+- The fake outline/generation responder dispatches on request purpose rather than returning one
+  fixed canned response for every call.

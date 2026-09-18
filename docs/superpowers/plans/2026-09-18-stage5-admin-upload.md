@@ -136,7 +136,7 @@ Commit: `feat: sqs worker consuming the same job messages`
 
 - Per-admin upload cap per hour in settings (`max_uploads_per_hour`), enforced in the route through the `jobs` table timestamps.
 - Reject files above `max_upload_bytes` (default 50 MB) before reading the body fully (check `Content-Length`).
-- Audit line in `llm_usage`'s neighbour: a new `admin_actions` table (who, what, when) written by every admin route. Migration `0004_admin_actions.sql`.
+- Audit line in `llm_usage`'s neighbour: a new `admin_actions` table (who, what, when) written by every admin route. Migration `0005_admin_actions.sql`.
 
 Commit: `feat: upload limits and admin action audit`
 

@@ -23,7 +23,7 @@ As stage 2. New stage 2 names used here: `TutorialService.rendered_part`, `Rende
 ## File structure
 
 ```
-api/teachme/adapters/db/migrations/0003_learning.sql
+api/teachme/adapters/db/migrations/0004_learning.sql
 api/teachme/adapters/db/pool.py                 ConnectionPool factory
 api/teachme/domain/models.py                    + PartStatus, AttemptStatus, Grade, RelevanceBand, Route,
                                                   PartProgress, Attempt, AttemptQuestion, Reexplanation
@@ -69,7 +69,7 @@ api/tests/...                                   one test file per module, named 
 ### Task 1: Learning schema, domain models, connection pool
 
 **Files:**
-- Create: `api/teachme/adapters/db/migrations/0003_learning.sql`, `api/teachme/adapters/db/pool.py`
+- Create: `api/teachme/adapters/db/migrations/0004_learning.sql`, `api/teachme/adapters/db/pool.py`
 - Modify: `api/teachme/domain/models.py`, `api/tests/conftest.py`, `pyproject.toml`
 - Test: `api/tests/domain/test_learning_models.py`, `api/tests/adapters/test_pool.py`
 
@@ -134,7 +134,7 @@ Expected: FAIL with `ImportError` / `ModuleNotFoundError`
 
 - [ ] **Step 3: Add dependencies** to `pyproject.toml` `dependencies`: `"psycopg-pool>=3.2"`, `"fastapi-clerk-auth>=0.0.7"`, `"sse-starlette>=2.1"`. Run `uv pip install -e ".[dev]" && uv pip compile pyproject.toml -o requirements.txt`.
 
-- [ ] **Step 4: Write `0003_learning.sql`**
+- [ ] **Step 4: Write `0004_learning.sql`**
 
 ```sql
 CREATE TABLE part_progress (
