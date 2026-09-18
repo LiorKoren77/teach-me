@@ -90,6 +90,7 @@ wins when one refusal subclasses another):
 
 | Status | Error | Covers |
 | --- | --- | --- |
+| 401 | *(`current_user`, not a domain error)* | No `Authorization` header, a scheme other than `Bearer`, a token that cannot be verified against the configured JWKS, or a verified token with no `sub` claim. The Clerk guard is built with `auto_error=False` precisely so this status - and this body - comes from us rather than the SDK's `403 Forbidden`. |
 | 404 | `NotFound` | The subject, source, attempt, question or other resource does not exist. |
 | 403 | `NotAllowed` | The caller does not own the attempt, the part is locked, the language is not enabled for the subject, or (via `require_role`) the caller's role does not permit an admin route. |
 | 429 | `RateLimited` | A `NotAllowed` subclass: the caller submitted more answers/rejections than `MAX_ANSWERS_PER_MINUTE` allows in the last minute. |

@@ -32,7 +32,12 @@ def user_from_claims(creds: Any) -> UserContext:
 
 async def current_user(request: Request) -> UserContext:
     """The only place a request turns into a user. Tests and local runs override this dependency
-    instead of minting Clerk tokens, so no test ever reaches Clerk."""
+    instead of minting Clerk tokens, so no test ever reaches Clerk.
+
+    The guard is built with `auto_error=False`, so every authentication failure is decided here:
+    no guard at all is a 503 (the deployment is misconfigured, not the caller), missing or
+    unverifiable credentials and a token with no subject are 401, and a role that does not permit
+    the route is a 403 in `require_role`."""
     guard: ClerkHTTPBearer | None = getattr(request.app.state, "clerk_guard", None)
     if guard is None:
         raise HTTPException(status_code=503, detail="authentication is not configured")
@@ -44,8 +49,14 @@ async def current_user(request: Request) -> UserContext:
 
 def make_clerk_guard(jwks_url: str | None) -> ClerkHTTPBearer | None:
     """No JWKS url configured (the fake stack, a local run) means no guard: `current_user` then
-    refuses every request unless the dependency is overridden."""
-    return ClerkHTTPBearer(ClerkConfig(jwks_url=jwks_url)) if jwks_url else None
+    refuses every request unless the dependency is overridden.
+
+    `auto_error=False` is what makes `current_user` the only place a refusal is decided: with the
+    SDK's default the guard raises its own `HTTPException(403, "Forbidden")` for a missing header,
+    a wrong scheme and an unverifiable token alike, which is the wrong status, the wrong message
+    and not our error body. Without it the guard hands back `None` (or credentials with no decoded
+    claims) and the 401 below answers instead."""
+    return ClerkHTTPBearer(ClerkConfig(jwks_url=jwks_url), auto_error=False) if jwks_url else None
 
 
 CurrentUser = Annotated[UserContext, Depends(current_user)]
