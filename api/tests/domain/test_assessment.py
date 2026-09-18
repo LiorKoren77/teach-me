@@ -41,6 +41,8 @@ def test_transitions_table():
     assert_transition(PartStatus.REINFORCING, PartStatus.QUIZZING)
     assert_transition(PartStatus.STALLED, PartStatus.LEARNING)
     assert_transition(PartStatus.LEARNING, PartStatus.LEARNING)  # reopening is idempotent
+    assert_transition(PartStatus.LEARNING, PartStatus.STALLED)  # the bank ran out mid-attempt
+    assert_transition(PartStatus.REINFORCING, PartStatus.STALLED)
     for illegal in [
         (PartStatus.NOT_STARTED, PartStatus.PASSED),
         (PartStatus.PASSED, PartStatus.QUIZZING),

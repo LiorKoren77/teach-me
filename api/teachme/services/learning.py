@@ -68,6 +68,12 @@ class NotAllowed(LearningError):
     pass
 
 
+class BankExhausted(LearningError):
+    """The attempt has asked every question this part has: the part stalls, it is never locked.
+
+    A fresh attempt starts with an empty asked set, so the whole bank is available again."""
+
+
 @dataclass(frozen=True, kw_only=True)
 class LearningDeps:
     """Everything the learning loop needs, bundled so the state machine keeps one parameter."""
@@ -192,7 +198,11 @@ class LearningService:
             rng=self._rng,
         )
         if not picked:
-            raise LearningError("the question bank for this part is exhausted")
+            self._stall_exhausted(attempt, progress)
+            raise BankExhausted(
+                "the question bank for this part is exhausted; start a fresh attempt to be asked"
+                " its questions again"
+            )
         round_no = attempt.round_no + 1
         try:
             self.d.attempts.set_round(attempt.id, round_no)
@@ -205,6 +215,18 @@ class LearningService:
             self.d.conn.rollback()
             raise
         return self._question_view(self.d.attempts.get(attempt.id), rows[0], subject)
+
+    def _stall_exhausted(self, attempt: Attempt, progress: PartProgress) -> None:
+        """Close the attempt rather than leave it active with nothing left to ask: an active
+        attempt with an empty bank would hand the student the same finished round forever."""
+        assert_transition(progress.status, PartStatus.STALLED)
+        try:
+            self.d.progress.update(progress.id, status=PartStatus.STALLED)
+            self.d.attempts.finish(attempt.id, AttemptStatus.FAILED)
+            self.d.conn.commit()
+        except Exception:
+            self.d.conn.rollback()
+            raise
 
     def submit_answer(
         self,

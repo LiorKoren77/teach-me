@@ -5,10 +5,17 @@ from uuid import uuid4
 import pytest
 
 from teachme.container import Container
-from teachme.domain.models import Grade, PartStatus, Question, QuestionKind, Route
+from teachme.domain.models import (
+    AttemptStatus,
+    Grade,
+    PartStatus,
+    Question,
+    QuestionKind,
+    Route,
+)
 from teachme.grading.grader import GradeOut
 from teachme.grading.relevance_check import RelevanceVerdict
-from teachme.services.learning import LearningError, NotAllowed
+from teachme.services.learning import BankExhausted, LearningError, NotAllowed
 from teachme.settings import Settings
 from tests.helpers import make_pdf
 
@@ -50,6 +57,21 @@ def _grade(verdict):
         rubric_covered=[0] if verdict != "incorrect" else [],
         missed_concepts=["m"],
         feedback=f"fb-{verdict}",
+    )
+
+
+def _free_text(section_id, position):
+    return Question(
+        id=uuid4(),
+        section_id=section_id,
+        language="en",
+        kind=QuestionKind.FREE_TEXT,
+        prompt=f"Question {position} about the ozone layer?",
+        expected_answer="the ozone layer",
+        rubric=("names the layer",),
+        key_terms=(),
+        exact_values=(),
+        position=position,
     )
 
 
@@ -247,3 +269,29 @@ def test_publish_with_new_version_resets_progress(env):
     c.tutorial_service.generate(draft)  # new outline version 2
     c.tutorial_service.publish(c.subjects.get(subject.id))
     assert c.progress.list_for_subject(USER, subject.id) == []
+
+
+def test_an_exhausted_question_bank_stalls_the_part_instead_of_locking_it(env):
+    """Nothing is permanently locked: the bank runs out mid-attempt, the part stalls, and a fresh
+    attempt - whose asked set is empty - has the whole bank to draw from again."""
+    c, subject, fake = env
+    fake.set_responder(GradeOut, _grade("incorrect"))
+    session = c.learning_service.start_part(USER, subject, position=0, language="en")
+    part_id = c.attempts.get(session.attempt_id).part_id
+    section = c.outlines.sections(part_id)[0]
+    # smaller than questions_per_round * max_rounds: round 1 takes five, round 2 the last one
+    c.questions.replace_for_part(part_id, "en", [_free_text(section.id, i) for i in range(6)])
+    c.conn.commit()
+
+    for _round_no in (1, 2):
+        question = c.learning_service.begin_round(USER, session.attempt_id)
+        _answer_all(c, session.attempt_id, question)
+    with pytest.raises(BankExhausted, match="fresh attempt"):
+        c.learning_service.begin_round(USER, session.attempt_id)
+    assert c.progress.get(USER, part_id).status == PartStatus.STALLED
+    assert c.attempts.get(session.attempt_id).status == AttemptStatus.FAILED
+
+    retry = c.learning_service.start_part(USER, subject, position=0, language="en")
+    assert retry.status == PartStatus.LEARNING and retry.attempt_id != session.attempt_id
+    reopened = c.learning_service.begin_round(USER, retry.attempt_id)
+    assert reopened.round_no == 1 and reopened.total_in_round == subject.questions_per_round

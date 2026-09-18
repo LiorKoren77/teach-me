@@ -4,9 +4,11 @@ from teachme.domain.models import PartStatus
 
 _ALLOWED: dict[PartStatus, frozenset[PartStatus]] = {
     PartStatus.NOT_STARTED: frozenset({PartStatus.LEARNING}),
-    PartStatus.LEARNING: frozenset({PartStatus.LEARNING, PartStatus.QUIZZING}),
+    # STALLED from LEARNING or REINFORCING is the exhausted-bank exit: there is nothing left to
+    # ask in this attempt, and a stalled part can always be started over.
+    PartStatus.LEARNING: frozenset({PartStatus.LEARNING, PartStatus.QUIZZING, PartStatus.STALLED}),
     PartStatus.QUIZZING: frozenset({PartStatus.PASSED, PartStatus.REINFORCING, PartStatus.STALLED}),
-    PartStatus.REINFORCING: frozenset({PartStatus.QUIZZING}),
+    PartStatus.REINFORCING: frozenset({PartStatus.QUIZZING, PartStatus.STALLED}),
     PartStatus.STALLED: frozenset({PartStatus.LEARNING}),
     PartStatus.PASSED: frozenset(),
 }
