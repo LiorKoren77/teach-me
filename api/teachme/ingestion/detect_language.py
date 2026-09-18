@@ -30,4 +30,7 @@ def detect_language(llm: LLMProvider, model: str, pages: Sequence[Page]) -> str 
         max_tokens=256,
         effort="low",
     )
-    return llm.generate_structured(request, DetectedLanguage).output.code.lower()
+    code = llm.generate_structured(request, DetectedLanguage).output.code.strip().lower()
+    if code == "und" or len(code) != 2 or not code.isascii() or not code.isalpha():
+        return None
+    return code

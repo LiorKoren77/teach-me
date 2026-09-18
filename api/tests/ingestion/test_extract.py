@@ -66,3 +66,27 @@ def test_detect_language_uses_first_pages():
 
 def test_detect_language_empty_pages_is_none():
     assert detect_language(FakeLLM({}), "fake-model", []) is None
+
+
+def test_detect_language_und_is_none():
+    from teachme.domain.models import Page
+
+    llm = FakeLLM({DetectedLanguage: lambda req: DetectedLanguage(code="und", name="Undetermined")})
+    pages = [Page(page_index=0, printed_number=None, text="???")]
+    assert detect_language(llm, "fake-model", pages) is None
+
+
+def test_detect_language_non_code_is_none():
+    from teachme.domain.models import Page
+
+    llm = FakeLLM({DetectedLanguage: lambda req: DetectedLanguage(code="Portuguese", name="Portuguese")})
+    pages = [Page(page_index=0, printed_number=None, text="texto")]
+    assert detect_language(llm, "fake-model", pages) is None
+
+
+def test_detect_language_normalizes_case():
+    from teachme.domain.models import Page
+
+    llm = FakeLLM({DetectedLanguage: lambda req: DetectedLanguage(code="PT", name="Portuguese")})
+    pages = [Page(page_index=0, printed_number=None, text="texto")]
+    assert detect_language(llm, "fake-model", pages) == "pt"
