@@ -1,48 +1,29 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from functools import cached_property
-from uuid import UUID
 
 import psycopg
+from psycopg_pool import ConnectionPool
 
-from teachme.adapters.chunk_search.pgvector import PgVectorChunkSearch
 from teachme.adapters.db.engine import connect
 from teachme.adapters.db.migrate import ensure_schema_current
+from teachme.adapters.db.pool import make_pool
 from teachme.adapters.embeddings.fake import FakeEmbedder
 from teachme.adapters.file_store.local import LocalFileStore
 from teachme.adapters.file_store.prefixed import PrefixedFileStore
-from teachme.adapters.job_runner.inprocess import InProcessJobRunner
 from teachme.adapters.llm.fake import FakeLLM
 from teachme.adapters.reranker.noop import NoopReranker
 from teachme.generation.fake_responders import default_responders as generation_responders
 from teachme.ingestion.fake_responders import default_responders as ingestion_responders
-from teachme.ingestion.pipeline import IngestionPipeline, PipelineDeps
 from teachme.ports.embeddings import Embedder
 from teachme.ports.file_store import FileStore
-from teachme.ports.job_runner import JobPayload, JobRunner
 from teachme.ports.llm import LLMProvider
 from teachme.ports.reranker import Reranker
-from teachme.repositories.attempts import AttemptRepository
-from teachme.repositories.content import ContentRepository
-from teachme.repositories.figures import FigureRepository
-from teachme.repositories.glossary import GlossaryRepository
-from teachme.repositories.jobs import JobRepository
-from teachme.repositories.outlines import OutlineRepository
-from teachme.repositories.pages import PageRepository
-from teachme.repositories.progress import ProgressRepository
-from teachme.repositories.questions import QuestionRepository
-from teachme.repositories.sources import SourceRepository
-from teachme.repositories.subjects import SubjectRepository
 from teachme.repositories.usage import UsageRepository
-from teachme.retrieval.hybrid import HybridSearch
+from teachme.scope import Scope
 from teachme.services.corpus_cache import CorpusCache
-from teachme.services.export_import import ExportImportService
-from teachme.services.learning import LearningDeps, LearningService
-from teachme.services.progress import ProgressService
-from teachme.services.sources import SourceService
-from teachme.services.subjects import SubjectService
-from teachme.services.tutorial import TutorialService
-from teachme.services.usage import UsageService
 from teachme.settings import Settings
 from teachme.telemetry.prices import PriceTable
 from teachme.telemetry.recording import RecordingEmbedder, RecordingLLM
@@ -96,8 +77,10 @@ def build_file_store(settings: Settings) -> FileStore:
 
 
 class Container:
-    """Builds every adapter, repository and service once from Settings. The only place that
-    knows which concrete class stands behind each port."""
+    """Process-wide singletons - settings, adapters, caches, the connection pool - plus a default
+    Scope on one connection for the CLI. Attribute lookups for repositories and services fall
+    through to that default scope, so `container.pipeline` keeps working; an HTTP request takes
+    its own scope from the pool with `request_scope()`."""
 
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or Settings()
@@ -108,6 +91,11 @@ class Container:
         return connect(self.settings.database_url)
 
     @cached_property
+    def pool(self) -> ConnectionPool:
+        """Request connections. Opened lazily: the CLI never touches it."""
+        return make_pool(self.settings.database_url)
+
+    @cached_property
     def usage_conn(self) -> psycopg.Connection:
         """Telemetry writes here, on its own autocommit connection: a usage row records money
         already spent, so it must not be rolled back with the pipeline step that failed."""
@@ -116,6 +104,10 @@ class Container:
     @cached_property
     def prices(self) -> PriceTable:
         return PriceTable()
+
+    @cached_property
+    def usage_repo(self) -> UsageRepository:
+        return UsageRepository(self.usage_conn)
 
     @cached_property
     def usage_recorder(self) -> UsageRecorder:
@@ -145,180 +137,35 @@ class Container:
         return stores
 
     @cached_property
-    def search(self) -> PgVectorChunkSearch:
-        return PgVectorChunkSearch(self.conn)
-
-    # repositories ---------------------------------------------------------------------------
-    @cached_property
-    def subjects(self) -> SubjectRepository:
-        return SubjectRepository(self.conn)
-
-    @cached_property
-    def sources(self) -> SourceRepository:
-        return SourceRepository(self.conn)
-
-    @cached_property
-    def pages(self) -> PageRepository:
-        return PageRepository(self.conn)
-
-    @cached_property
-    def figures(self) -> FigureRepository:
-        return FigureRepository(self.conn)
-
-    @cached_property
-    def jobs(self) -> JobRepository:
-        return JobRepository(self.conn)
-
-    @cached_property
-    def outlines(self) -> OutlineRepository:
-        return OutlineRepository(self.conn)
-
-    @cached_property
-    def glossary(self) -> GlossaryRepository:
-        return GlossaryRepository(self.conn)
-
-    @cached_property
-    def content(self) -> ContentRepository:
-        return ContentRepository(self.conn)
-
-    @cached_property
-    def questions(self) -> QuestionRepository:
-        return QuestionRepository(self.conn)
-
-    @cached_property
-    def progress(self) -> ProgressRepository:
-        return ProgressRepository(self.conn)
-
-    @cached_property
-    def attempts(self) -> AttemptRepository:
-        return AttemptRepository(self.conn)
-
-    @cached_property
-    def usage_repo(self) -> UsageRepository:
-        return UsageRepository(self.usage_conn)
-
-    # pipeline, jobs, services ---------------------------------------------------------------
-    @cached_property
-    def pipeline_deps(self) -> PipelineDeps:
-        return PipelineDeps(
-            conn=self.conn,
-            settings=self.settings,
-            llm=self.llm,
-            embedder=self.embedder,
-            search=self.search,
-            files=self.files,
-            bundle_stores=self.bundle_stores,
-            subjects=self.subjects,
-            sources=self.sources,
-            pages=self.pages,
-            figures=self.figures,
-        )
-
-    @cached_property
-    def pipeline(self) -> IngestionPipeline:
-        return IngestionPipeline(self.pipeline_deps)
-
-    def _ingest_job(self, payload: JobPayload) -> None:
-        self.pipeline.ingest_source(UUID(payload["source_id"]))
-
-    @cached_property
-    def job_runner(self) -> JobRunner:
-        if self.settings.job_runner == "sqs":
-            if not self.settings.sqs_queue_url:
-                raise ConfigurationError("JOB_RUNNER=sqs requires SQS_QUEUE_URL")
-            from teachme.adapters.job_runner.sqs import SqsJobRunner
-
-            return SqsJobRunner(
-                self.settings.sqs_queue_url,
-                self.settings.aws_region,
-                jobs=self.jobs,
-                commit=self.conn.commit,
-            )
-        return InProcessJobRunner(
-            {"ingest_source": self._ingest_job},
-            jobs=self.jobs,
-            commit=self.conn.commit,
-            rollback=self.conn.rollback,
-        )
-
-    @cached_property
-    def subject_service(self) -> SubjectService:
-        return SubjectService(self.conn, self.subjects, self.settings)
-
-    @cached_property
-    def source_service(self) -> SourceService:
-        return SourceService(
-            self.conn, self.settings, self.llm, self.files, self.search, self.sources, self.subjects
-        )
-
-    @cached_property
     def corpus_cache(self) -> CorpusCache:
         return CorpusCache()
 
+    # scopes ---------------------------------------------------------------------------------
     @cached_property
-    def progress_service(self) -> ProgressService:
-        return ProgressService(self.conn, self.outlines, self.progress)
+    def scope(self) -> Scope:
+        """The CLI's scope, on the container's single connection."""
+        return Scope(self, self.conn)
 
-    @cached_property
-    def learning_service(self) -> LearningService:
-        return LearningService(
-            LearningDeps(
-                conn=self.conn,
-                settings=self.settings,
-                llm=self.llm,
-                hybrid=self.hybrid_search,
-                subjects=self.subjects,
-                outlines=self.outlines,
-                glossary=self.glossary,
-                content=self.content,
-                questions=self.questions,
-                progress=self.progress,
-                attempts=self.attempts,
-                tutorial=self.tutorial_service,
-                progress_service=self.progress_service,
-                corpus_cache=self.corpus_cache,
-            )
-        )
+    def __getattr__(self, name: str):
+        # Only reached for names this class does not define: the repositories and services that
+        # now live on a Scope. The guard keeps a half-built container from recursing forever.
+        if name.startswith("_") or name in ("settings", "scope", "conn", "usage_conn", "pool"):
+            raise AttributeError(name)
+        return getattr(self.scope, name)
 
-    @cached_property
-    def tutorial_service(self) -> TutorialService:
-        service = TutorialService(
-            self.conn,
-            self.settings,
-            self.llm,
-            self.subjects,
-            self.sources,
-            self.pages,
-            self.outlines,
-            self.glossary,
-            self.content,
-            self.questions,
-            self.bundle_stores,
-        )
-        # A new published version means new part ids: a student's progress against the old ones
-        # is meaningless, so it is dropped the moment the version changes.
-        service.on_version_published(
-            lambda subject, version: self.progress_service.reset_for_new_version(subject, version)
-        )
-        return service
-
-    @cached_property
-    def usage_service(self) -> UsageService:
-        return UsageService(self.usage_repo)
-
-    @cached_property
-    def export_import(self) -> ExportImportService:
-        return ExportImportService(self.pipeline_deps)
-
-    @cached_property
-    def hybrid_search(self) -> HybridSearch:
-        return HybridSearch(self.embedder, self.search, self.reranker)
+    @contextmanager
+    def request_scope(self) -> Iterator[Scope]:
+        """One request, one pooled connection. `pool.connection()` commits a clean exit, rolls
+        back a failed one and returns the connection either way, so no request can leak it."""
+        with self.pool.connection() as conn:
+            with Scope(self, conn).active() as scope:
+                yield scope
 
     # lifecycle ------------------------------------------------------------------------------
     def check_ready(self) -> None:
         """Fail fast with a named reason instead of on the first request."""
         ensure_schema_current(self.conn)
-        expected = self.search.dimension()
+        expected = self.scope.search.dimension()
         if self.embedder.dimension != expected:
             raise ConfigurationError(
                 f"embedder {self.embedder.model!r} has dimension {self.embedder.dimension}, "
@@ -326,10 +173,12 @@ class Container:
             )
         # Touch every adapter so a missing/invalid configuration surfaces here, at startup,
         # rather than on the first request that happens to need it.
-        _ = (self.files, self.job_runner, self.llm, self.reranker)
+        _ = (self.files, self.scope.job_runner, self.llm, self.reranker)
         self.conn.rollback()
 
     def close(self) -> None:
         for name in ("conn", "usage_conn"):
             if name in self.__dict__:
                 self.__dict__[name].close()
+        if "pool" in self.__dict__:
+            self.__dict__["pool"].close()

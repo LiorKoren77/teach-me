@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     """Per-language overrides for the two thresholds above, because the lexical score is not
     equally generous in every language: RELEVANCE_THRESHOLDS={"he": {"high": 0.4, "low": 0.1}}."""
 
+    # Authentication: Clerk's JWKS endpoint for this instance. Unset means no guard is built and
+    # every authenticated route refuses, which is what a local run without Clerk should do.
+    clerk_jwks_url: str | None = None
+
     # Credentials, passed explicitly to adapters instead of adapters reading os.environ themselves.
     anthropic_api_key: SecretStr | None = None
     voyage_api_key: SecretStr | None = None
