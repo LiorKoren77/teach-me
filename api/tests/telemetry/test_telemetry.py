@@ -84,14 +84,18 @@ class Out(BaseModel):
 def test_recording_llm_and_embedder_delegate_and_record():
     repo = _Repo()
     recorder = UsageRecorder(repo, PriceTable())
-    llm = RecordingLLM(FakeLLM({Out: lambda r: Out(ok=True)}), recorder)
+    fake_llm = FakeLLM({Out: lambda r: Out(ok=True)})
+    llm = RecordingLLM(fake_llm, recorder)
     req = StructuredRequest(
         purpose="ingest.test", model="fake-model", system="s", parts=(ContentPart.of_text("x"),)
     )
     assert llm.generate_structured(req, Out).output.ok is True
     assert llm.name == "fake" and "application/pdf" in llm.capabilities().media_types
-    embedder = RecordingEmbedder(FakeEmbedder(dimension=8), recorder)
+    assert llm.inner is fake_llm
+    fake_embedder = FakeEmbedder(dimension=8)
+    embedder = RecordingEmbedder(fake_embedder, recorder)
     assert len(embedder.embed_documents(["a", "b"]).vectors) == 2
     assert embedder.dimension == 8 and embedder.model == "fake-embed"
+    assert embedder.inner is fake_embedder
     purposes = [r.purpose for r in repo.rows]
     assert purposes == ["ingest.test", "embed.documents"]

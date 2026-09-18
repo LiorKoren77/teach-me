@@ -16,6 +16,10 @@ class RecordingLLM:
         self._recorder = recorder
         self.name = inner.name
 
+    @property
+    def inner(self) -> LLMProvider:
+        return self._inner
+
     def capabilities(self) -> LLMCapabilities:
         return self._inner.capabilities()
 
@@ -39,6 +43,10 @@ class RecordingEmbedder:
         self.name = inner.name
         self.model = inner.model
         self.dimension = inner.dimension
+
+    @property
+    def inner(self) -> Embedder:
+        return self._inner
 
     def embed_documents(self, texts: Sequence[str]) -> EmbeddingResult:
         return self._timed("embed.documents", lambda: self._inner.embed_documents(texts))

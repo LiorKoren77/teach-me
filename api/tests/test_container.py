@@ -71,7 +71,7 @@ def test_usage_rows_survive_a_failed_pipeline_step(db, migrated_database, tmp_pa
         def boom(request):
             raise RuntimeError("language service down")
 
-        container.llm._inner.set_responder(DetectedLanguage, boom)
+        container.llm.inner.set_responder(DetectedLanguage, boom)
         with pytest.raises(RuntimeError):
             container.pipeline.ingest_source(source.id)
 
