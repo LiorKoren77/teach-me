@@ -9,4 +9,4 @@
 - GitHub: this is a personal project under `LiorKoren77`. Never use the company
   `gh` account. For `gh` calls use `GH_TOKEN=$(gh auth token --user LiorKoren77)`.
   Repo-local git identity is already set to LiorKoren77.
-- `reference/rag/` is migration source only; delete it at the end of stage 1.
+- Stage 1 (ingestion library + CLI) is complete. Run `teachme --help` for operator commands.
