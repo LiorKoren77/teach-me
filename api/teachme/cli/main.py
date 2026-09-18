@@ -16,6 +16,7 @@ from teachme.ingestion.estimate import estimate_ingest
 from teachme.ingestion.pdf_pages import page_count
 from teachme.ports.file_store import FileNotFound
 from teachme.repositories.errors import NotFound
+from teachme.repositories.outlines import OutlineVersionConflict
 from teachme.services.subjects import LanguageNotEnabled
 
 app = typer.Typer(no_args_is_help=True, help="teach-me operator commands")
@@ -35,6 +36,7 @@ _OPERATOR_ERRORS = (
     FileNotFound,
     ConfigurationError,
     GenerationError,
+    OutlineVersionConflict,
 )
 
 
@@ -331,11 +333,16 @@ def tutorial_show(
     subject: str = typer.Option(..., "--subject", "-s"),
     language: str = typer.Option(..., "--language", "-l"),
     part: int = typer.Option(0, "--part", "-p"),
+    draft: bool = typer.Option(False, "--draft", help="Render the latest version, published or not"),
 ) -> None:
     """Print a part's rendered teaching text as a student would receive it."""
 
     def body(c: Container) -> None:
-        rendered = c.tutorial_service.rendered_part(c.subject_service.require(subject), language, part)
+        rendered = c.tutorial_service.rendered_part(
+            c.subject_service.require(subject), language, part, draft=draft
+        )
+        state = "published" if rendered.published else "draft"
+        typer.echo(f"outline v{rendered.outline_version} ({state})")
         typer.echo(f"# {rendered.title}\n")
         typer.echo(rendered.body)
         typer.echo("\n## Key points")

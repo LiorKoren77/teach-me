@@ -231,3 +231,26 @@ def test_status_reports_per_part_readiness_and_failed_parts(container):
     assert he.parts_ready == he.parts_total - 1 and not he.complete and he.failed == (0,)
     assert en.parts_ready == en.parts_total and en.complete and en.failed == ()
     assert not status.publishable
+
+
+def test_rendered_part_treats_published_version_zero_as_missing(container):
+    subject = _ingested_subject(container)
+    container.tutorial_service.generate(subject)
+    zeroed = subject.model_copy(update={"current_outline_version": 0})
+    with pytest.raises(SubjectNotReady, match="no outline"):
+        container.tutorial_service.rendered_part(zeroed, "he", part_position=0)
+
+
+def test_rendered_part_can_render_the_latest_draft_version(container):
+    subject = _ingested_subject(container)
+    container.tutorial_service.generate(subject)
+    published = container.tutorial_service.publish(subject)
+    container.tutorial_service.unpublish(published)
+    container.tutorial_service.generate(container.subjects.get(subject.id), languages=["he"])
+    subject = container.tutorial_service.publish(container.subjects.get(subject.id))
+    assert subject.current_outline_version == 1
+
+    rendered = container.tutorial_service.rendered_part(subject, "he", part_position=0)
+    assert rendered.outline_version == 1 and rendered.published
+    draft = container.tutorial_service.rendered_part(subject, "he", part_position=0, draft=True)
+    assert draft.outline_version == 2 and not draft.published

@@ -77,6 +77,13 @@ class SubjectCorpus(BaseModel):
         return "\n".join(out)
 
 
+def dominant_language(sources: Sequence[Source]) -> str | None:
+    """The language most of a subject's sources were detected in, or None when none is known.
+    This is the corpus language: what glossary terms are in, and what rendering glosses from."""
+    languages = Counter(source.detected_language for source in sources if source.detected_language)
+    return languages.most_common(1)[0][0] if languages else None
+
+
 def build_corpus(sources: Sequence[Source], pages_by_source: Mapping[UUID, Sequence[Page]]) -> SubjectCorpus:
     corpus_pages: list[CorpusPage] = []
     for source in sources:
@@ -91,6 +98,4 @@ def build_corpus(sources: Sequence[Source], pages_by_source: Mapping[UUID, Seque
                     text=page.text,
                 )
             )
-    languages = Counter(s.detected_language for s in sources if s.detected_language)
-    language = languages.most_common(1)[0][0] if languages else None
-    return SubjectCorpus(pages=tuple(corpus_pages), language=language)
+    return SubjectCorpus(pages=tuple(corpus_pages), language=dominant_language(sources))

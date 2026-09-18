@@ -7,6 +7,7 @@ from teachme.adapters.db.migrate import SchemaOutOfDate
 from teachme.container import Container
 from teachme.generation.teaching import TeachingOut
 from teachme.ports.llm import LLMError
+from teachme.repositories.outlines import OutlineVersionConflict
 from teachme.settings import Settings
 from tests.helpers import make_pdf
 
@@ -205,3 +206,40 @@ def test_tutorial_status_counts_ready_parts_and_names_failed_parts(cli):
 
     result = runner.invoke(app, ["tutorial", "status", "--subject", "Geo"])
     assert "he: 1/2 parts ready" in result.output and "failed: [0]" in result.output
+
+
+def test_generate_reports_an_outline_version_conflict_as_an_operator_error(cli, monkeypatch):
+    import teachme.cli.main as main
+
+    app, pdf, tmp_path = cli
+    assert runner.invoke(app, ["ingest", "--subject", "Geo", "--yes", str(pdf)]).exit_code == 0
+
+    def boom(*args, **kwargs):
+        raise OutlineVersionConflict("another generate won the race for version 2")
+
+    monkeypatch.setattr(main.build_container().tutorial_service, "generate", boom)
+    result = runner.invoke(app, ["generate", "--subject", "Geo"])
+    assert result.exit_code == 1 and "error: another generate won the race" in result.output
+
+
+def test_tutorial_show_names_the_outline_version_and_can_render_a_draft(cli):
+    app, pdf, tmp_path = cli
+    assert runner.invoke(app, ["ingest", "--subject", "Geo", "--yes", str(pdf)]).exit_code == 0
+    assert runner.invoke(app, ["generate", "--subject", "Geo"]).exit_code == 0
+    assert runner.invoke(app, ["publish", "--subject", "Geo"]).exit_code == 0
+
+    result = runner.invoke(app, ["tutorial", "show", "--subject", "Geo", "--language", "he"])
+    assert result.exit_code == 0, result.output
+    assert "outline v1 (published)" in result.output
+
+    assert runner.invoke(app, ["unpublish", "--subject", "Geo"]).exit_code == 0
+    # v2 is generated for one language only, so it stays a draft and publish falls back to v1
+    assert runner.invoke(app, ["generate", "--subject", "Geo", "--language", "he"]).exit_code == 0
+    result = runner.invoke(app, ["publish", "--subject", "Geo"])
+    assert result.exit_code == 0 and "outline v1" in result.output
+
+    result = runner.invoke(app, ["tutorial", "show", "--subject", "Geo", "--language", "he"])
+    assert result.exit_code == 0 and "outline v1 (published)" in result.output
+    result = runner.invoke(app, ["tutorial", "show", "--subject", "Geo", "--language", "he", "--draft"])
+    assert result.exit_code == 0, result.output
+    assert "outline v2 (draft)" in result.output

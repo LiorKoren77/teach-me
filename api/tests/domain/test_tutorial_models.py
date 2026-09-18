@@ -5,7 +5,14 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from teachme.domain.models import ContentStatus, Question, QuestionKind, Section
+from teachme.domain.models import (
+    ContentStatus,
+    Question,
+    QuestionKind,
+    Section,
+    Subject,
+    SubjectState,
+)
 
 
 def test_question_multiple_choice_requires_choices_and_correct_index():
@@ -61,3 +68,13 @@ def test_section_page_range_ordering():
 
 def test_content_status_values():
     assert [s.value for s in ContentStatus] == ["generating", "ready", "failed"]
+
+
+def test_subject_gloss_frequency_is_one_of_the_rendering_frequencies():
+    def subject(**overrides):
+        return Subject(id=uuid4(), name="Geo", state=SubjectState.DRAFT, languages=("he",), **overrides)
+
+    assert subject().gloss_frequency == "first"
+    assert subject(gloss_frequency="never").gloss_frequency == "never"
+    with pytest.raises(ValidationError):
+        subject(gloss_frequency="sometimes")

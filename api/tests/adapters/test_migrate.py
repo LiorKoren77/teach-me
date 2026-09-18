@@ -3,6 +3,9 @@ from __future__ import annotations
 import threading
 from uuid import uuid4
 
+import psycopg
+import pytest
+
 from teachme.adapters.db.engine import connect
 from teachme.adapters.db.migrate import (
     applied_versions,
@@ -151,3 +154,13 @@ def test_tutorial_tables_exist(migrated_database):
         assert "0002_tutorial" in applied_versions(conn)
     finally:
         conn.close()
+
+
+def test_gloss_frequency_check_rejects_an_unknown_frequency(db):
+    assert "0003_gloss_frequency_check" in applied_versions(db)
+    with pytest.raises(psycopg.errors.CheckViolation):
+        db.execute(
+            "INSERT INTO subjects (id, name, state, languages, gloss_frequency) VALUES (%s, %s, %s, %s, %s)",
+            (uuid4(), "bad-frequency", "draft", ["en"], "sometimes"),
+        )
+    db.rollback()

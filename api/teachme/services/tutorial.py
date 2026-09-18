@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from collections import Counter
 from collections.abc import Callable, Sequence
 from uuid import UUID, uuid4
 
 import psycopg
 from pydantic import BaseModel
 
-from teachme.domain.glossary.render import Frequency, GlossaryView, render_placeholders
+from teachme.domain.glossary.render import GlossaryView, render_placeholders
 from teachme.domain.models import (
     ContentStatus,
     GlossaryTerm,
@@ -23,7 +22,7 @@ from teachme.domain.models import (
     SubjectState,
 )
 from teachme.generation.bundle import SubjectBundleWriter
-from teachme.generation.corpus import SubjectCorpus, build_corpus
+from teachme.generation.corpus import SubjectCorpus, build_corpus, dominant_language
 from teachme.generation.errors import GenerationError, SubjectNotReady
 from teachme.generation.glossary import generate_glossary, translate_glossary
 from teachme.generation.outline import generate_outline
@@ -93,6 +92,8 @@ class GlossaryEntry(BaseModel):
 
 
 class RenderedPart(BaseModel):
+    outline_version: int
+    published: bool
     position: int
     title: str
     body: str
@@ -480,10 +481,15 @@ class TutorialService:
         return self._subjects.get(subject.id)
 
     # rendering ------------------------------------------------------------------------------
-    def rendered_part(self, subject: Subject, language: str, part_position: int) -> RenderedPart:
+    def rendered_part(
+        self, subject: Subject, language: str, part_position: int, *, draft: bool = False
+    ) -> RenderedPart:
+        """The published version of a part, or with draft=True the latest version of it."""
         version = subject.current_outline_version
         outline = (
-            self._outlines.get_version(subject.id, version) if version else self._outlines.latest(subject.id)
+            self._outlines.latest(subject.id)
+            if draft or version is None
+            else self._outlines.get_version(subject.id, version)
         )
         if outline is None:
             raise SubjectNotReady(f"subject {subject.name!r} has no outline")
@@ -499,9 +505,14 @@ class TutorialService:
             source_language=self._corpus_language(subject),
             source_terms={t.slug: t.source_term for t in terms},
         )
-        frequency: Frequency = subject.gloss_frequency  # type: ignore[assignment]
-        body = render_placeholders(content.body, view, target_language=language, frequency=frequency)
+        body = render_placeholders(
+            content.body, view, target_language=language, frequency=subject.gloss_frequency
+        )
         return RenderedPart(
+            outline_version=outline.version,
+            published=(
+                subject.state == SubjectState.PUBLISHED and outline.version == subject.current_outline_version
+            ),
             position=part.position,
             title=content.title,
             body=body,
@@ -519,7 +530,4 @@ class TutorialService:
         )
 
     def _corpus_language(self, subject: Subject) -> str | None:
-        languages: Counter[str] = Counter(
-            s.detected_language for s in self._sources.list_by_subject(subject.id) if s.detected_language
-        )
-        return languages.most_common(1)[0][0] if languages else None
+        return dominant_language(self._sources.list_by_subject(subject.id))

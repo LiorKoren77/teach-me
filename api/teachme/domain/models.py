@@ -5,6 +5,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from teachme.domain.glossary.render import Frequency
+
 
 class SubjectState(StrEnum):
     DRAFT = "draft"
@@ -36,7 +38,7 @@ class Subject(Frozen):
     max_rounds: int = 3
     questions_per_round: int = 5
     bank_size_per_part: int = 25
-    gloss_frequency: str = "first"
+    gloss_frequency: Frequency = "first"
     current_outline_version: int | None = None
 
 

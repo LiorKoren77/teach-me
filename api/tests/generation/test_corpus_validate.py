@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from teachme.adapters.llm.fake import FakeLLM
 from teachme.domain.models import Page, Source, SourceStatus
-from teachme.generation.corpus import SubjectCorpus, build_corpus
+from teachme.generation.corpus import SubjectCorpus, build_corpus, dominant_language
 from teachme.generation.errors import GenerationValidationError
 from teachme.generation.prompts import load_prompt
 from teachme.generation.validate import generate_validated
@@ -82,6 +82,10 @@ def test_corpus_language_is_majority_of_sources():
     c = c.model_copy(update={"detected_language": "he"})
     pages = {s.id: [Page(page_index=0, printed_number=None, text="x")] for s in (a, b, c)}
     assert build_corpus([a, b, c], pages).language == "he"
+    assert dominant_language([a, b, c]) == "he"
+    assert dominant_language([a]) == "pt"
+    assert dominant_language([a.model_copy(update={"detected_language": None})]) is None
+    assert dominant_language([]) is None
 
 
 def test_corpus_render_escapes_source_name_and_printed_number():
