@@ -48,3 +48,13 @@ def test_source_lifecycle(db):
     repo.delete(source.id)
     with pytest.raises(SourceNotFound):
         repo.get(source.id)
+
+
+def test_set_status_ignores_error_and_resume_status_when_not_failed(db):
+    subject = SubjectRepository(db).create("Chemistry", ["en"])
+    repo = SourceRepository(db)
+    source = repo.create(subject.id, "ch1.pdf", "application/pdf", "sources/x/ch1.pdf", 1)
+    repo.set_status(source.id, SourceStatus.READY, error="leaked", resume_status=SourceStatus.CHUNKING)
+    loaded = repo.get(source.id)
+    assert loaded.error is None
+    assert loaded.resume_status is None

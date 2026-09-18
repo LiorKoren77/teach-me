@@ -22,7 +22,7 @@ def _row_to_source(row: dict) -> Source:
         file_key=row["file_key"],
         size=row["size"],
         status=SourceStatus(row["status"]),
-        resume_status=SourceStatus(row["resume_status"]) if row["resume_status"] else None,
+        resume_status=SourceStatus(row["resume_status"]) if row["resume_status"] is not None else None,
         error=row["error"],
         page_count=row["page_count"],
         vision_pages=row["vision_pages"],
@@ -65,10 +65,13 @@ class SourceRepository:
         resume_status: SourceStatus | None = None,
     ) -> None:
         """A non-failed status clears error and resume_status; FAILED records both."""
+        if status is not SourceStatus.FAILED:
+            error = None
+            resume_status = None
         self._conn.execute(
             "UPDATE sources SET status = %s, error = %s, resume_status = %s, updated_at = now()"
             " WHERE id = %s",
-            (status.value, error, resume_status.value if resume_status else None, source_id),
+            (status.value, error, resume_status.value if resume_status is not None else None, source_id),
         )
 
     def set_extraction_result(
