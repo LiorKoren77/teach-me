@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -84,3 +86,18 @@ def test_rejects_relevance_thresholds_out_of_order(monkeypatch):
     monkeypatch.setenv("RELEVANCE_THRESHOLDS", '{"he":{"high":0.2,"low":0.5}}')
     with pytest.raises(ValidationError, match="'he'"):
         Settings(_env_file=None)
+
+
+def test_env_example_documents_every_setting():
+    """.env.example is the operator's checklist, and a setting that never appears in it is one
+    nobody knows to set. Every field is documented there - none is secret enough to leave out,
+    since the file carries names and placeholders only - so the two cannot drift apart. A
+    commented-out line counts: an optional override is documented by being shown."""
+    env_example = Path(__file__).resolve().parents[2] / ".env.example"
+    documented = {
+        line.lstrip("#").strip().split("=", 1)[0].strip()
+        for line in env_example.read_text().splitlines()
+        if "=" in line
+    }
+    missing = sorted(name.upper() for name in Settings.model_fields if name.upper() not in documented)
+    assert missing == []
