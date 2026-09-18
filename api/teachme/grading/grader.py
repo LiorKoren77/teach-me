@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from teachme.domain.glossary.render import GlossaryView, render_placeholders
 from teachme.domain.models import ChunkHit, Grade, Question
 from teachme.grading.prompts import load_prompt
+from teachme.grading.sanitize import as_student_data
 from teachme.ports.llm import ContentPart, LLMProvider, StructuredRequest
 
 GRADE_MAX_TOKENS = 1500
@@ -17,7 +18,9 @@ class GradeOut(BaseModel):
     verdict: Literal["correct", "partial", "incorrect", "off_topic"]
     rubric_covered: list[int] = Field(description="Indices of rubric points the answer covers")
     missed_concepts: list[str] = Field(description="Short phrases for what the student missed")
-    feedback: str = Field(description="One or two sentences for the student, without the full answer")
+    feedback: str = Field(
+        min_length=1, description="One or two sentences for the student, without the full answer"
+    )
 
 
 class GradeResult(BaseModel):
@@ -47,12 +50,19 @@ def grade_answer(
         f"EXPECTED: {render_for_grader(question.expected_answer, glossary, language)}",
     ]
     lines += [f"RUBRIC {i}: {point}" for i, point in enumerate(question.rubric)]
+    # the key terms and values a correct answer turns on, so the grader can credit a student who
+    # used the source-language form instead of the translation
+    if question.key_terms:
+        rendered = (render_for_grader(term, glossary, language) for term in question.key_terms)
+        lines.append("KEY TERMS: " + ", ".join(rendered))
+    if question.exact_values:
+        lines.append("EXACT VALUES: " + ", ".join(question.exact_values))
     lines += [f"GLOSSARY: {slug} = {term}" for slug, term in sorted(glossary.source_terms.items())]
     lines.append("EVIDENCE:")
     lines += [
         f'<extract pages="{h.page_start}-{h.page_end}">\n{h.content}\n</extract>' for h in evidence
     ] or ["(none retrieved)"]
-    lines.append(f"\n<student_answer>\n{answer}\n</student_answer>")
+    lines.append("\n" + as_student_data(answer))
     request = StructuredRequest(
         purpose="learn.grade",
         model=model,
