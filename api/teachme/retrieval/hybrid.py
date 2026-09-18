@@ -32,7 +32,7 @@ class HybridSearch:
     def search(
         self, subject_id: UUID, query: str, language_code: str, k: int | None = None
     ) -> list[ChunkHit]:
-        k = k or self._final_k
+        k = self._final_k if k is None else k
         vector = self._embedder.embed_query(query).vectors[0]
         dense = self._search.dense(subject_id, vector, self._candidates)
         lexical = self._search.lexical(subject_id, tokenize(query, language_code), self._candidates)
@@ -40,4 +40,4 @@ class HybridSearch:
         if not fused:
             return []
         order = self._reranker.rerank(query, [hit.content for hit in fused], top_k=k)
-        return [fused[index] for index in order]
+        return [fused[index] for index in order if 0 <= index < len(fused)][:k]

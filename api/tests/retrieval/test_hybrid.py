@@ -39,3 +39,31 @@ def test_hybrid_empty_subject():
     embedder = FakeEmbedder(dimension=8)
     hybrid = HybridSearch(embedder, InMemoryChunkSearch(dimension=8), NoopReranker())
     assert hybrid.search(uuid4(), "anything", language_code="he") == []
+
+
+class _OverReturningReranker:
+    name = "over-returning"
+
+    def rerank(self, query, documents, top_k):
+        return list(range(100))
+
+
+def test_hybrid_caps_results_at_k_even_when_reranker_over_returns():
+    embedder = FakeEmbedder(dimension=16)
+    search = InMemoryChunkSearch(dimension=16)
+    subject_id = uuid4()
+    search.upsert([_record(subject_id, f"filler text number {i}", embedder) for i in range(5)])
+
+    hybrid = HybridSearch(embedder, search, _OverReturningReranker(), candidates=10, final_k=3)
+    hits = hybrid.search(subject_id, "filler", language_code="en")
+    assert len(hits) <= 3
+
+
+def test_hybrid_k_zero_returns_empty():
+    embedder = FakeEmbedder(dimension=16)
+    search = InMemoryChunkSearch(dimension=16)
+    subject_id = uuid4()
+    search.upsert([_record(subject_id, f"filler text number {i}", embedder) for i in range(5)])
+
+    hybrid = HybridSearch(embedder, search, _OverReturningReranker(), candidates=10, final_k=3)
+    assert hybrid.search(subject_id, "filler", language_code="en", k=0) == []
