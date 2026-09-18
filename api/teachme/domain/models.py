@@ -275,8 +275,8 @@ class Attempt(Frozen):
     user_id: str
     part_id: UUID
     language: str
-    round_no: int
     status: AttemptStatus
+    round_no: int = Field(default=0, ge=0, description="0 until the first round is sampled")
 
 
 class AttemptQuestion(Frozen):

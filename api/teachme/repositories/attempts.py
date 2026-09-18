@@ -28,6 +28,19 @@ class AttemptNotFound(NotFound):
     entity = "attempt"
 
 
+class ActiveAttemptExists(Exception):
+    """attempts_one_active_idx: a (student, part) can hold only one active attempt at a time.
+
+    Raised instead of the raw UniqueViolation so the learning service, which resumes the active
+    attempt and starts a new one only after the previous is finished, fails with a name.
+    """
+
+    def __init__(self, user_id: str, part_id: UUID) -> None:
+        super().__init__(f"{user_id} already has an active attempt on part {part_id}")
+        self.user_id = user_id
+        self.part_id = part_id
+
+
 def _attempt(row: dict) -> Attempt:
     return Attempt(
         id=row["id"],
@@ -80,10 +93,14 @@ class AttemptRepository:
 
     def create(self, user_id: str, part_id: UUID, language: str) -> Attempt:
         attempt_id = uuid4()
-        self._conn.execute(
-            "INSERT INTO attempts (id, user_id, part_id, language, status) VALUES (%s, %s, %s, %s, 'active')",
-            (attempt_id, user_id, part_id, language),
-        )
+        try:
+            self._conn.execute(
+                "INSERT INTO attempts (id, user_id, part_id, language, status)"
+                " VALUES (%s, %s, %s, %s, 'active')",
+                (attempt_id, user_id, part_id, language),
+            )
+        except psycopg.errors.UniqueViolation as exc:
+            raise ActiveAttemptExists(user_id, part_id) from exc
         return self.get(attempt_id)
 
     def get(self, attempt_id: UUID) -> Attempt:

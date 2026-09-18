@@ -164,3 +164,22 @@ def test_gloss_frequency_check_rejects_an_unknown_frequency(db):
             (uuid4(), "bad-frequency", "draft", ["en"], "sometimes"),
         )
     db.rollback()
+
+
+def test_learning_indexes_cover_the_learning_queries(db):
+    names = {
+        row["indexname"]
+        for row in db.execute(
+            "SELECT indexname FROM pg_indexes WHERE tablename IN"
+            " ('part_progress', 'attempts', 'attempt_questions', 'reexplanations')"
+        ).fetchall()
+    }
+    assert {
+        "attempts_one_active_idx",
+        "attempts_part_idx",
+        "part_progress_part_idx",
+        "part_progress_subject_idx",
+        "attempt_questions_question_idx",
+        "reexplanations_attempt_round_idx",
+    } <= names
+    assert "attempt_questions_answered_idx" not in names  # redundant with the unique key

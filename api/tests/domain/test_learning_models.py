@@ -6,7 +6,9 @@ import pytest
 from pydantic import ValidationError
 
 from teachme.domain.models import (
+    Attempt,
     AttemptQuestion,
+    AttemptStatus,
     Grade,
     PartProgress,
     PartStatus,
@@ -64,3 +66,10 @@ def test_part_progress_best_score_is_a_fraction():
     ):
         with pytest.raises(ValidationError):
             PartProgress(**base, **bad)
+
+
+def test_attempt_starts_at_round_zero_like_the_table_default():
+    base = dict(id=uuid4(), user_id="u", part_id=uuid4(), language="he", status=AttemptStatus.ACTIVE)
+    assert Attempt(**base).round_no == 0
+    with pytest.raises(ValidationError):
+        Attempt(**base, round_no=-1)

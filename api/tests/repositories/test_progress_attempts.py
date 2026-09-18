@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+import psycopg
+import pytest
+
 from teachme.domain.models import (
     AttemptStatus,
     Grade,
@@ -11,7 +14,7 @@ from teachme.domain.models import (
     RelevanceBand,
     Route,
 )
-from teachme.repositories.attempts import AttemptRepository
+from teachme.repositories.attempts import ActiveAttemptExists, AttemptRepository
 from teachme.repositories.outlines import OutlineRepository
 from teachme.repositories.progress import ProgressRepository
 from teachme.repositories.questions import QuestionRepository
@@ -94,3 +97,70 @@ def test_attempts_lifecycle(db):
     assert repo.latest_reexplanation(attempt.id).body == "again"
     repo.finish(attempt.id, AttemptStatus.PASSED)
     assert repo.get(attempt.id).status == AttemptStatus.PASSED and repo.active("user_1", p1.id) is None
+
+
+def test_learning_schema_enforces_the_domain_enums_and_ranges(db):
+    """The status, grade, band and route columns feed StrEnums: a value outside them cannot be
+    loaded back as a domain object at all, so the database refuses to store one."""
+    subject, outline, (p1, _), q = _fixture(db)
+    attempts = AttemptRepository(db)
+    attempt = attempts.create("user_1", p1.id, "he")
+    aq = attempts.add_questions(attempt.id, round_no=1, question_ids=[q.id])[0]
+    progress = ProgressRepository(db).ensure_for_subject("user_1", subject.id, outline.version, [p1.id])
+    db.commit()
+
+    rejected = [
+        (
+            "INSERT INTO attempts (id, user_id, part_id, language, status) VALUES (%s, %s, %s, %s, %s)",
+            (uuid4(), "user_2", p1.id, "he", "halfway"),
+        ),
+        (
+            "INSERT INTO part_progress (id, user_id, subject_id, part_id, outline_version, status)"
+            " VALUES (%s, %s, %s, %s, %s, %s)",
+            (uuid4(), "user_2", subject.id, p1.id, outline.version, "thinking"),
+        ),
+        ("UPDATE part_progress SET rounds_used = -1 WHERE id = %s", (progress[0].id,)),
+        ("UPDATE part_progress SET best_score = 1.5 WHERE id = %s", (progress[0].id,)),
+        ("UPDATE attempt_questions SET grade = 'maybe' WHERE id = %s", (aq.id,)),
+        ("UPDATE attempt_questions SET relevance_band = 'medium' WHERE id = %s", (aq.id,)),
+        ("UPDATE attempt_questions SET route = 'guess' WHERE id = %s", (aq.id,)),
+        ("UPDATE attempt_questions SET relevance_score = 1.5 WHERE id = %s", (aq.id,)),
+    ]
+    for sql, params in rejected:
+        with pytest.raises(psycopg.errors.CheckViolation):
+            db.execute(sql, params)
+        db.rollback()
+
+    # best_score is a fraction: a percent does not even fit the column
+    with pytest.raises(psycopg.errors.NumericValueOutOfRange):
+        db.execute("UPDATE part_progress SET best_score = 60 WHERE id = %s", (progress[0].id,))
+    db.rollback()
+
+
+def test_only_one_active_attempt_per_user_and_part(db):
+    _, _, (p1, _), _ = _fixture(db)
+    repo = AttemptRepository(db)
+    first = repo.create("user_1", p1.id, "he")
+    db.commit()
+
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        db.execute(
+            "INSERT INTO attempts (id, user_id, part_id, language, status) VALUES (%s, %s, %s, %s, 'active')",
+            (uuid4(), "user_1", p1.id, "he"),
+        )
+    db.rollback()
+
+    with pytest.raises(ActiveAttemptExists, match=str(p1.id)):
+        repo.create("user_1", p1.id, "he")
+    db.rollback()
+
+    repo.finish(first.id, AttemptStatus.FAILED)  # finishing the attempt frees the slot
+    assert repo.create("user_1", p1.id, "he").id != first.id
+
+
+def test_best_score_round_trips_a_four_decimal_fraction(db):
+    subject, outline, (p1, _), _ = _fixture(db)
+    repo = ProgressRepository(db)
+    rows = repo.ensure_for_subject("user_1", subject.id, outline.version, [p1.id])
+    repo.update(rows[0].id, best_score=0.375)
+    assert repo.get("user_1", p1.id).best_score == 0.375
