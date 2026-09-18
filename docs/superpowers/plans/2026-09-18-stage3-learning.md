@@ -979,7 +979,7 @@ and add to the `LLMProvider` protocol:
 
 - [ ] **Step 5: Extend `FakeLLM`**
 
-Constructor gains `text_responder: Callable[[TextRequest], str] | None = None`; `stream_text` records the request in `self.calls`, raises `LLMParseError("FakeLLM has no text responder")` when none is set, otherwise splits the responder's string into chunks of 5 characters, calls `on_delta` for each, and returns `TextResult(text=..., usage=LLMUsage(input_tokens=500, output_tokens=100), model="fake-model")`.
+Constructor gains `text_responder: Callable[[TextRequest], str] | None = None` and a public `set_text_responder(responder)` (mirroring `set_responder`); `stream_text` records the request in `self.calls`, raises `LLMParseError("FakeLLM has no text responder")` when none is set, otherwise splits the responder's string into chunks of 5 characters, calls `on_delta` for each, and returns `TextResult(text=..., usage=LLMUsage(input_tokens=500, output_tokens=100), model="fake-model")`.
 
 - [ ] **Step 6: Extend `RecordingLLM`** with `stream_text` that times the call and records `purpose=request.purpose`, `provider=self._inner.name`, `model=result.model`, `usage=result.usage`.
 
@@ -1752,7 +1752,7 @@ def test_open_subject_creates_progress_and_locks_later_parts(env):
 
 def test_full_pass_on_first_round(env):
     c, subject, fake = env
-    fake._responders[GradeOut] = _grade("correct")
+    fake.set_responder(GradeOut, _grade("correct"))
     session = c.learning_service.start_part(USER, subject, position=0, language="he")
     assert session.status == PartStatus.LEARNING and session.attempt_id and "{{term:" not in session.part.body
     first = c.learning_service.begin_round(USER, session.attempt_id)
@@ -1768,8 +1768,8 @@ def test_full_pass_on_first_round(env):
 
 def test_fail_reinforce_then_pass(env):
     c, subject, fake = env
-    fake._responders[GradeOut] = _grade("incorrect")
-    fake._text_responder = lambda req: "## Again\n\n{{term:biosphere|x}} explained differently."
+    fake.set_responder(GradeOut, _grade("incorrect"))
+    fake.set_text_responder(lambda req: "## Again\n\n{{term:biosphere|x}} explained differently.")
     session = c.learning_service.start_part(USER, subject, position=0, language="he")
     first = c.learning_service.begin_round(USER, session.attempt_id)
     result = _answer_all(c, session.attempt_id, first)
@@ -1784,7 +1784,7 @@ def test_fail_reinforce_then_pass(env):
     assert "".join(replay) == reexp.body
     assert sum(1 for r in fake.calls if r.purpose == "learn.reexplain") == 1
 
-    fake._responders[GradeOut] = _grade("correct")
+    fake.set_responder(GradeOut, _grade("correct"))
     second = c.learning_service.begin_round(USER, session.attempt_id)
     assert second.round_no == 2
     asked_round1 = {q.question_id for q in c.attempts.questions_for_round(session.attempt_id, 1)}
@@ -1796,8 +1796,8 @@ def test_fail_reinforce_then_pass(env):
 
 def test_stall_after_max_rounds_then_retry(env):
     c, subject, fake = env
-    fake._responders[GradeOut] = _grade("incorrect")
-    fake._text_responder = lambda req: "again"
+    fake.set_responder(GradeOut, _grade("incorrect"))
+    fake.set_text_responder(lambda req: "again")
     session = c.learning_service.start_part(USER, subject, position=0, language="en")
     for round_no in range(1, subject.max_rounds + 1):
         q = c.learning_service.begin_round(USER, session.attempt_id)
@@ -1811,8 +1811,8 @@ def test_stall_after_max_rounds_then_retry(env):
 
 def test_relevance_routing_junk_offtopic_and_multiple_choice(env):
     c, subject, fake = env
-    fake._responders[GradeOut] = _grade("correct")
-    fake._responders[RelevanceVerdict] = lambda req: RelevanceVerdict(verdict="off_topic")
+    fake.set_responder(GradeOut, _grade("correct"))
+    fake.set_responder(RelevanceVerdict, lambda req: RelevanceVerdict(verdict="off_topic"))
     session = c.learning_service.start_part(USER, subject, position=0, language="en")
     q = c.learning_service.begin_round(USER, session.attempt_id)
     assert q.kind == QuestionKind.FREE_TEXT
@@ -1827,7 +1827,7 @@ def test_relevance_routing_junk_offtopic_and_multiple_choice(env):
     assert recorded.route.value == "check" and recorded.check_verdict == "off_topic" and recorded.rejections == 2
 
     # a clearly on-topic answer skips the check and goes to the grader
-    fake._responders[RelevanceVerdict] = lambda req: RelevanceVerdict(verdict="on_topic")
+    fake.set_responder(RelevanceVerdict, lambda req: RelevanceVerdict(verdict="on_topic"))
     nxt = off.next_question
     while nxt is not None and nxt.kind != QuestionKind.MULTIPLE_CHOICE:
         res = c.learning_service.submit_answer(USER, session.attempt_id, nxt.attempt_question_id,
@@ -2447,7 +2447,7 @@ def test_container_delegates_to_its_default_scope(db, migrated_database, tmp_pat
     c.close()
 
 
-def test_request_scope_uses_pooled_connection_and_routes_usage_rows(db, migrated_database, tmp_path):
+def test_request_scope_uses_pooled_connection_and_usage_rows_are_durable(db, migrated_database, tmp_path):
     c = Container(_settings(migrated_database, tmp_path))
     with c.request_scope() as scope:
         assert scope.conn is not c.conn
@@ -2458,7 +2458,7 @@ def test_request_scope_uses_pooled_connection_and_routes_usage_rows(db, migrated
         class Out(BaseModel):
             ok: bool
 
-        c.llm._inner._responders[Out] = lambda req: Out(ok=True)
+        c.llm._inner.set_responder(Out, lambda req: Out(ok=True))
         c.llm.generate_structured(StructuredRequest(purpose="scope.test", model="fake-model", system="s",
                                                     parts=(ContentPart.of_text("x"),)), Out)
         scope.conn.commit()
@@ -2515,19 +2515,7 @@ def test_require_admin():
 Run: `pytest -q api/tests/test_scope.py api/tests/auth`
 Expected: FAIL with `AttributeError: ... 'scope'` / `ModuleNotFoundError`
 
-- [ ] **Step 3: Make the usage recorder resolve its repository lazily** (`telemetry/usage.py`)
-
-```python
-RepoProvider = Callable[[], UsageRepository]
-
-
-class UsageRecorder:
-    def __init__(self, repo: UsageRepository | RepoProvider, prices: PriceTable) -> None:
-        self._provider: RepoProvider = repo if callable(repo) else (lambda: repo)
-        self._prices = prices
-```
-
-and replace `self._repo.insert(row)` with `self._provider().insert(row)` in both record methods. (Import `Callable` from `collections.abc`.)
+- [ ] **Step 3: Telemetry stays on the container.** Since stage 1, `Container.usage_repo` writes through a dedicated autocommit connection (`usage_conn`), so usage rows never depend on a request's transaction. No change to `telemetry/usage.py` is needed; `Scope.usage_repo` below is for reads (summaries) on the request connection.
 
 - [ ] **Step 4: Write `scope.py`**
 
@@ -2571,9 +2559,6 @@ from teachme.services.usage import UsageService
 
 if TYPE_CHECKING:
     from teachme.container import Container
-
-current_usage_repo: ContextVar[UsageRepository | None] = ContextVar("teachme_usage_repo", default=None)
-
 
 class Scope:
     """Everything that needs a database connection, built for one connection. The container has a
@@ -2705,15 +2690,12 @@ class Scope:
 
     @contextmanager
     def active(self) -> Iterator[Scope]:
-        """Bind this scope's usage repository for the duration, roll back if the body raises."""
-        token = current_usage_repo.set(self.usage_repo)
+        """Roll back if the body raises; commits are explicit in services."""
         try:
             yield self
         except BaseException:
             self.conn.rollback()
             raise
-        finally:
-            current_usage_repo.reset(token)
 ```
 
 - [ ] **Step 5: Rewrite `container.py`** so it holds only process-wide singletons and delegates the rest to its default scope
@@ -2742,8 +2724,16 @@ class Container:
         return PriceTable()
 
     @cached_property
+    def usage_conn(self) -> psycopg.Connection:
+        return connect(self.settings.database_url, autocommit=True)
+
+    @cached_property
+    def usage_repo(self) -> UsageRepository:
+        return UsageRepository(self.usage_conn)
+
+    @cached_property
     def usage_recorder(self) -> UsageRecorder:
-        return UsageRecorder(lambda: current_usage_repo.get() or self.scope.usage_repo, self.prices)
+        return UsageRecorder(self.usage_repo, self.prices)
 
     @cached_property
     def llm(self) -> LLMProvider:
@@ -2777,7 +2767,7 @@ class Container:
         return Scope(self, self.conn)
 
     def __getattr__(self, name: str):
-        if name.startswith("_") or name in ("scope", "conn"):
+        if name.startswith("_") or name in ("scope", "conn", "usage_conn", "usage_repo"):
             raise AttributeError(name)
         return getattr(self.scope, name)
 
@@ -2796,13 +2786,14 @@ class Container:
             )
 
     def close(self) -> None:
-        if "conn" in self.__dict__:
-            self.conn.close()
+        for name in ("conn", "usage_conn"):
+            if name in self.__dict__:
+                getattr(self, name).close()
         if "pool" in self.__dict__:
             self.pool.close()
 ```
 
-Imports to add: `from contextlib import contextmanager`, `from collections.abc import Iterator`, `from psycopg_pool import ConnectionPool`, `from teachme.adapters.db.pool import make_pool`, `from teachme.scope import Scope, current_usage_repo`, `from teachme.services.corpus_cache import CorpusCache`. Remove the repository/service imports that moved to `scope.py`. Note the `pool.connection()` context manager commits on clean exit and rolls back on exception; `Scope.active()` also rolls back, which is harmless.
+Imports to add: `from contextlib import contextmanager`, `from collections.abc import Iterator`, `from psycopg_pool import ConnectionPool`, `from teachme.adapters.db.pool import make_pool`, `from teachme.scope import Scope`, `from teachme.services.corpus_cache import CorpusCache`. Remove the repository/service imports that moved to `scope.py`. Note the `pool.connection()` context manager commits on clean exit and rolls back on exception; `Scope.active()` also rolls back, which is harmless.
 
 - [ ] **Step 6: Auth.** Add to `Settings`: `clerk_jwks_url: str | None = None`. Write `auth/__init__.py` (empty), `auth/clerk.py`:
 
@@ -2926,8 +2917,8 @@ def api(db, migrated_database, tmp_path):
     container.tutorial_service.generate(subject)
     container.tutorial_service.publish(subject)
     fake = container.llm._inner
-    fake._responders[GradeOut] = lambda req: GradeOut(verdict="correct", rubric_covered=[0], missed_concepts=[], feedback="good")
-    fake._text_responder = lambda req: "## Again\n\nexplained {{term:biosphere|x}}"
+    fake.set_responder(GradeOut, lambda req: GradeOut(verdict="correct", rubric_covered=[0], missed_concepts=[], feedback="good"))
+    fake.set_text_responder(lambda req: "## Again\n\nexplained {{term:biosphere|x}}")
 
     app = create_app(container)
     user = {"id": "user_1", "role": "student"}
@@ -2971,7 +2962,7 @@ def test_learning_flow_over_http(api):
 
 def test_reexplain_stream_and_errors(api):
     client, subject, user, fake = api
-    fake._responders[GradeOut] = lambda req: GradeOut(verdict="incorrect", rubric_covered=[], missed_concepts=["m"], feedback="no")
+    fake.set_responder(GradeOut, lambda req: GradeOut(verdict="incorrect", rubric_covered=[], missed_concepts=["m"], feedback="no"))
     session = client.post(f"/api/subjects/{subject.id}/parts/0/start", json={"language": "he"}).json()
     attempt_id = session["attempt_id"]
     question = client.post(f"/api/attempts/{attempt_id}/round").json()
