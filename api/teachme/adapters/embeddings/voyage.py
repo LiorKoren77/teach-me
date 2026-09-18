@@ -52,7 +52,9 @@ class VoyageEmbedder:
         reraise=True,
     )
     def _embed(self, texts: list[str], input_type: str) -> EmbeddingResult:
-        response = self._client.embed(texts, model=self.model, input_type=input_type)
+        response = self._client.embed(
+            texts, model=self.model, input_type=input_type, output_dimension=self.dimension
+        )
         return EmbeddingResult(
             vectors=[list(v) for v in response.embeddings],
             tokens=int(response.total_tokens),

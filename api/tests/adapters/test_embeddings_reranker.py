@@ -13,8 +13,8 @@ class _VoyageStub:
     def __init__(self):
         self.embed_calls = []
 
-    def embed(self, texts, model, input_type):
-        self.embed_calls.append((list(texts), model, input_type))
+    def embed(self, texts, model, input_type, output_dimension=None):
+        self.embed_calls.append((list(texts), model, input_type, output_dimension))
         return SimpleNamespace(embeddings=[[0.0] * 4 for _ in texts], total_tokens=7 * len(texts))
 
     def rerank(self, query, documents, model, top_k):
@@ -39,6 +39,7 @@ def test_voyage_embedder_batches_and_sums_tokens():
     assert len(result.vectors) == 3 and result.tokens == 21
     assert [len(call[0]) for call in stub.embed_calls] == [2, 1]
     assert stub.embed_calls[0][2] == "document"
+    assert all(call[3] == emb.dimension for call in stub.embed_calls)
     emb.embed_query("q")
     assert stub.embed_calls[-1][2] == "query"
 

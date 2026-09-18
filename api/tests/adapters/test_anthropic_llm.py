@@ -6,7 +6,15 @@ import pytest
 from pydantic import BaseModel
 
 from teachme.adapters.llm.anthropic import AnthropicLLM
-from teachme.ports.llm import ContentPart, LLMOutputTruncated, LLMRefused, StructuredRequest
+from teachme.ports.llm import (
+    ContentPart,
+    LLMOutputTruncated,
+    LLMParseError,
+    LLMRefused,
+    StructuredRequest,
+)
+
+_MISSING = object()
 
 
 class Answer(BaseModel):
@@ -40,8 +48,8 @@ class _StubClient:
         return _Stream(self._message)
 
 
-def _message(stop_reason="end_turn", parsed=None):
-    parsed = parsed if parsed is not None else Answer(value=7)
+def _message(stop_reason="end_turn", parsed=_MISSING):
+    parsed = parsed if parsed is not _MISSING else Answer(value=7)
     usage = SimpleNamespace(
         input_tokens=120, output_tokens=8, cache_read_input_tokens=100, cache_creation_input_tokens=None
     )
@@ -83,6 +91,12 @@ def test_refusal_and_truncation_raise():
         llm.generate_structured(_request(), Answer)
     with pytest.raises(LLMOutputTruncated):
         llm = AnthropicLLM(client=_StubClient(_message(stop_reason="max_tokens")))
+        llm.generate_structured(_request(), Answer)
+
+
+def test_missing_parsed_output_is_parse_error():
+    with pytest.raises(LLMParseError, match="end_turn"):
+        llm = AnthropicLLM(client=_StubClient(_message(parsed=None)))
         llm.generate_structured(_request(), Answer)
 
 

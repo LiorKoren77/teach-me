@@ -61,7 +61,10 @@ class AnthropicLLM:
             raise LLMOutputTruncated(f"{request.purpose}: output exceeded max_tokens={request.max_tokens}")
         output = message.parsed_output
         if output is None:
-            raise LLMParseError(f"{request.purpose}: no parseable {schema.__name__} in response")
+            raise LLMParseError(
+                f"{request.purpose}: no parseable {schema.__name__} in response"
+                f" (stop_reason={message.stop_reason})"
+            )
 
         usage = LLMUsage(
             input_tokens=message.usage.input_tokens,
@@ -75,7 +78,8 @@ class AnthropicLLM:
 def _to_block(part: ContentPart) -> dict[str, Any]:
     if part.kind == "text":
         return {"type": "text", "text": part.text or ""}
-    assert part.data is not None and part.media_type is not None
+    if part.data is None or part.media_type is None:
+        raise ValueError(f"{part.kind} part needs data and media_type")
     encoded = base64.standard_b64encode(part.data).decode("ascii")
     source = {"type": "base64", "media_type": part.media_type, "data": encoded}
     return {"type": "document" if part.kind == "document" else "image", "source": source}
