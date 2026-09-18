@@ -16,26 +16,33 @@ class Language:
     prefixes: tuple[str, ...] = ()
 
 
-_HE_STOPWORDS = frozenset(
-    "של את על עם הוא היא הם הן זה זאת אני אתה את אנחנו לא כן גם כי אם או אבל יש אין כל מה מי איך למה "
+_HE_WORDS = (
+    "של את על עם הוא היא הם הן זה זאת אני אתה אנחנו לא כן גם כי אם או אבל יש אין כל מה מי איך למה "
     "כאשר אשר היה היו יהיה להיות בין עד אל מן אחרי לפני כמו יותר פחות רק עוד כבר אז שם פה כאן".split()
 )
-_EN_STOPWORDS = frozenset(
+_EN_WORDS = (
     "a an the and or but if then of to in on at by for with from as is are was were be been being it its "
     "this that these those there here he she they them his her their we you i not no yes do does did have "
     "has had will would can could should may might which who whom what when where why how than so "
-    "such".split()
+    "such into about only also other some all".split()
 )
-_PT_STOPWORDS = frozenset(
+_PT_WORDS = (
     "a o as os um uma uns umas de do da dos das em no na nos nas por para com sem sob sobre e ou mas se "
     "que quem qual quais como quando onde porque não sim é são foi foram ser está estão ele ela eles elas "
     "eu tu nós vós seu sua seus suas meu minha este esta isto esse essa isso aquele aquela aquilo há mais "
-    "menos já".split()
+    "menos já ao aos à às pelo pela num numa também".split()
 )
+
+_HE_STOPWORDS = frozenset(_HE_WORDS)
+_EN_STOPWORDS = frozenset(_EN_WORDS)
+_PT_STOPWORDS = frozenset(_PT_WORDS)
 
 LANGUAGES: dict[str, Language] = {
     "he": Language(
-        code="he", name="Hebrew", direction="rtl", stopwords=_HE_STOPWORDS,
+        code="he",
+        name="Hebrew",
+        direction="rtl",
+        stopwords=_HE_STOPWORDS,
         prefixes=("ו", "ה", "ב", "ל", "מ", "ש", "כ"),
     ),
     "en": Language(code="en", name="English", direction="ltr", stopwords=_EN_STOPWORDS),

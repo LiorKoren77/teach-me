@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from teachme.domain.languages import LANGUAGES, get_language
+from teachme.domain.languages import _EN_WORDS, _HE_WORDS, _PT_WORDS, LANGUAGES, get_language
 
 
 def test_three_languages_registered():
@@ -26,3 +26,8 @@ def test_english_and_portuguese_are_ltr():
 def test_unknown_code_raises():
     with pytest.raises(KeyError):
         get_language("xx")
+
+
+@pytest.mark.parametrize("words", [_HE_WORDS, _EN_WORDS, _PT_WORDS])
+def test_stopword_lists_have_no_duplicates(words):
+    assert len(set(words)) == len(words)
