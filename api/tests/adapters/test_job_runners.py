@@ -39,6 +39,25 @@ def test_inprocess_records_status_and_reraises(db):
     assert failed[0]["status"] == "failed" and failed[0]["error"] == "bad"
 
 
+def test_inprocess_rolls_back_before_recording_failure_then_commits(db):
+    jobs = JobRepository(db)
+
+    def boom(payload):
+        try:
+            db.execute("SELECT 1/0")
+        except Exception:
+            pass
+        raise RuntimeError("bad")
+
+    runner = InProcessJobRunner({"boom": boom}, jobs=jobs, commit=db.commit, rollback=db.rollback)
+    with pytest.raises(RuntimeError, match="bad"):
+        runner.enqueue("boom", {})
+
+    db.rollback()
+    row = db.execute("SELECT status, error FROM jobs WHERE kind = 'boom'").fetchone()
+    assert row["status"] == "failed" and row["error"] == "bad"
+
+
 def test_sqs_sends_message_with_job_id():
     with mock_aws():
         sqs = boto3.client("sqs", region_name="eu-central-1")
