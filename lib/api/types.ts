@@ -31,8 +31,8 @@ export interface UsageRow { purpose: string; model: string; calls: number; input
 // api/teachme/services/tutorial.py's status view (the same numbers `teachme tutorial status`
 // prints). Every one of these is behind the admin role.
 
-/** The media types `SourceService` accepts, for the file picker's `accept`. */
-export interface AdminCapabilities { accepted_media_types: string[]; }
+/** The media types `SourceService` accepts, for the file picker's `accept`, and the per-file size cap. */
+export interface AdminCapabilities { accepted_media_types: string[]; max_upload_bytes: number; }
 export type JobStatus = "queued" | "running" | "done" | "failed";
 export interface AdminJob { id: string; kind: string; status: JobStatus; attempts: number; error: string | null; }
 /** What an upload answers with: the registered source, plus the ingestion job now queued for it. */

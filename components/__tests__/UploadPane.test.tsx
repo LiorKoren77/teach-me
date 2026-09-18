@@ -15,6 +15,7 @@ const source = (over: Partial<AdminSource> = {}): AdminSource => ({
 const props = {
   sources: [] as AdminSource[],
   acceptedMediaTypes: ["application/pdf", "image/png"],
+  maxUploadBytes: 50 * 1024 * 1024,
   published: false,
   busy: false,
   strings,
@@ -76,5 +77,35 @@ describe("UploadPane", () => {
 
     expect(onUpload).toHaveBeenCalledTimes(1);
     expect(onUpload.mock.calls[0][0].name).toBe("book.pdf");
+  });
+
+  it("refuses a file over the size cap, showing the limit in MB, and leaves the picker usable", async () => {
+    const onUpload = vi.fn();
+    const user = userEvent.setup();
+    render(<UploadPane {...props} maxUploadBytes={1024 * 1024} onUpload={onUpload} />);
+
+    const big = new File(["x"], "big.pdf", { type: "application/pdf" });
+    Object.defineProperty(big, "size", { value: 2 * 1024 * 1024 });
+    await user.upload(screen.getByLabelText(strings.chooseFile), big);
+
+    expect(screen.getByText(strings.fileTooLarge(1))).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: strings.upload })).toBeDisabled();
+    expect(onUpload).not.toHaveBeenCalled();
+    // The picker itself stays enabled so another file can be chosen.
+    expect(screen.getByLabelText(strings.chooseFile)).toBeEnabled();
+  });
+
+  it("uploads a file under the size cap", async () => {
+    const onUpload = vi.fn();
+    const user = userEvent.setup();
+    render(<UploadPane {...props} maxUploadBytes={1024 * 1024} onUpload={onUpload} />);
+
+    const small = new File(["x"], "small.pdf", { type: "application/pdf" });
+    Object.defineProperty(small, "size", { value: 1024 });
+    await user.upload(screen.getByLabelText(strings.chooseFile), small);
+    await user.click(screen.getByRole("button", { name: strings.upload }));
+
+    expect(onUpload).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(strings.fileTooLarge(1))).not.toBeInTheDocument();
   });
 });

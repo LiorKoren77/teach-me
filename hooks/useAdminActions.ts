@@ -20,6 +20,12 @@ import { useApiError } from "./useApiError";
 const POLL_MS = 3000;
 /** The two source statuses that never change again on their own. */
 const SETTLED = ["ready", "failed"];
+/**
+ * Upper bound on how many times a job is polled before giving up on it - about two minutes at
+ * `POLL_MS`. A job stuck behind a crashed worker would otherwise be asked about forever for as
+ * long as the admin screen stays open.
+ */
+export const MAX_JOB_POLL_TICKS = 40;
 
 /**
  * Everything read or written about one subject, tagged with the subject it belongs to. Holding
@@ -34,9 +40,11 @@ interface SubjectData {
   job: AdminJob | null;
   /** The job being followed; `null` once it is done or failed, which stops the polling. */
   jobId: string | null;
+  /** True once the job poll hit `MAX_JOB_POLL_TICKS` without the job reaching done/failed. */
+  jobStale: boolean;
 }
 
-const EMPTY: SubjectData = { id: null, sources: null, status: null, job: null, jobId: null };
+const EMPTY: SubjectData = { id: null, sources: null, status: null, job: null, jobId: null, jobStale: false };
 
 /**
  * Everything an admin does to one subject: upload, delete and re-ingest its sources, generate,
@@ -51,6 +59,8 @@ const EMPTY: SubjectData = { id: null, sources: null, status: null, job: null, j
 export function useAdminActions(subjectId: string | null, onSubjectChanged?: (subject: AdminSubject) => void) {
   const { getToken, isSignedIn } = useAuth();
   const [acceptedMediaTypes, setAccepted] = useState<string[]>([]);
+  // Infinite until the capabilities answer lands, so nothing is refused before the real cap is known.
+  const [maxUploadBytes, setMaxUploadBytes] = useState<number>(Number.POSITIVE_INFINITY);
   const [data, setData] = useState<SubjectData>(EMPTY);
   const [busy, setBusy] = useState(false);
   const { error, fail, clear } = useApiError();
@@ -94,7 +104,9 @@ export function useAdminActions(subjectId: string | null, onSubjectChanged?: (su
     let cancelled = false;
     adminCapabilities(getToken)
       .then((capabilities) => {
-        if (!cancelled) setAccepted(capabilities.accepted_media_types);
+        if (cancelled) return;
+        setAccepted(capabilities.accepted_media_types);
+        setMaxUploadBytes(capabilities.max_upload_bytes);
       })
       .catch((failure) => {
         if (!cancelled) fail(failure);
@@ -121,15 +133,26 @@ export function useAdminActions(subjectId: string | null, onSubjectChanged?: (su
   useEffect(() => {
     if (!isSignedIn || !subjectId || !jobId) return;
     let cancelled = false;
+    let ticks = 0;
     const tick = () => {
+      ticks += 1;
       adminJob(jobId, getToken)
         .then((next) => {
           if (cancelled) return;
           const finished = next.status === "done" || next.status === "failed";
-          patch(subjectId, { job: next, jobId: finished ? null : jobId });
-          if (!finished) return;
-          void refreshSources();
-          void refreshStatus();
+          if (finished) {
+            patch(subjectId, { job: next, jobId: null, jobStale: false });
+            void refreshSources();
+            void refreshStatus();
+            return;
+          }
+          // Gave up: a crashed or wedged worker would otherwise be polled for as long as the
+          // screen stays open. The job's own state is kept so the last known status still shows.
+          if (ticks >= MAX_JOB_POLL_TICKS) {
+            patch(subjectId, { job: next, jobId: null, jobStale: true });
+            return;
+          }
+          patch(subjectId, { job: next, jobId });
         })
         .catch((failure) => {
           if (cancelled) return;
@@ -169,7 +192,7 @@ export function useAdminActions(subjectId: string | null, onSubjectChanged?: (su
         // Shown at once so the reader sees the file land; the poll above takes it from there.
         setData((previous) => {
           const base = previous.id === subjectId ? previous : { ...EMPTY, id: subjectId };
-          return { ...base, sources: [...(base.sources ?? []), source], jobId: started };
+          return { ...base, sources: [...(base.sources ?? []), source], jobId: started, jobStale: false };
         });
       });
     },
@@ -197,7 +220,7 @@ export function useAdminActions(subjectId: string | null, onSubjectChanged?: (su
       if (!subjectId) return;
       void run(async () => {
         const started = await reingestSource(sourceId, getToken);
-        patch(subjectId, { jobId: started.job_id });
+        patch(subjectId, { jobId: started.job_id, jobStale: false });
         await refreshSources();
       });
     },
@@ -208,7 +231,7 @@ export function useAdminActions(subjectId: string | null, onSubjectChanged?: (su
     if (!subjectId) return;
     void run(async () => {
       const started = await generateSubject(subjectId, getToken);
-      patch(subjectId, { jobId: started.job_id });
+      patch(subjectId, { jobId: started.job_id, jobStale: false });
     });
   }, [subjectId, getToken, run, patch]);
 
@@ -230,9 +253,12 @@ export function useAdminActions(subjectId: string | null, onSubjectChanged?: (su
 
   return {
     acceptedMediaTypes,
+    maxUploadBytes,
     sources: current.sources,
     status: current.status,
     job: current.job,
+    /** True once the job poll gave up on a job that never reached done/failed. */
+    jobStale: current.jobStale,
     busy,
     error,
     /** The backend's word on it, which is what locks uploads and the per-source actions. */

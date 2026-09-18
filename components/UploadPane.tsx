@@ -17,6 +17,7 @@ import type { Strings } from "@/lib/i18n";
 export function UploadPane({
   sources,
   acceptedMediaTypes,
+  maxUploadBytes,
   published,
   busy,
   strings,
@@ -27,6 +28,8 @@ export function UploadPane({
 }: {
   sources: AdminSource[];
   acceptedMediaTypes: string[];
+  /** The backend's `Capabilities.max_upload_bytes`; a chosen file over this is refused client-side. */
+  maxUploadBytes: number;
   published: boolean;
   busy: boolean;
   strings: Strings;
@@ -38,13 +41,19 @@ export function UploadPane({
   const inputId = useId();
   const input = useRef<HTMLInputElement>(null);
   const [chosen, setChosen] = useState<File | null>(null);
+  const [oversized, setOversized] = useState(false);
+
+  const choose = (file: File | null) => {
+    setChosen(file);
+    setOversized(file !== null && file.size > maxUploadBytes);
+  };
 
   const send = () => {
-    if (!chosen) return;
+    if (!chosen || oversized) return;
     onUpload(chosen);
     // The same file picked twice in a row fires no change event unless the input is cleared, and
     // re-uploading the same file is a real thing to want after a failed ingestion.
-    setChosen(null);
+    choose(null);
     if (input.current) input.current.value = "";
   };
 
@@ -62,7 +71,7 @@ export function UploadPane({
           type="file"
           accept={acceptedMediaTypes.join(",")}
           disabled={published || busy}
-          onChange={(event) => setChosen(event.target.files?.[0] ?? null)}
+          onChange={(event) => choose(event.target.files?.[0] ?? null)}
           className="text-sm text-stone-700 file:me-2 file:rounded file:border file:border-stone-300 file:bg-stone-50 file:px-2 file:py-1 file:text-xs"
         />
         <p className="text-xs text-stone-500">{strings.acceptedTypes(acceptedMediaTypes.join(", "))}</p>
@@ -70,13 +79,16 @@ export function UploadPane({
           <button
             type="button"
             onClick={send}
-            disabled={published || busy || chosen === null}
+            disabled={published || busy || chosen === null || oversized}
             className="rounded border border-stone-300 px-3 py-1 text-sm hover:border-stone-500 disabled:opacity-50"
           >
             {strings.upload}
           </button>
           {busy ? <span className="text-xs text-stone-500">{strings.uploading}</span> : null}
         </div>
+        {oversized ? (
+          <p className="text-xs text-red-700">{strings.fileTooLarge(maxUploadBytes / (1024 * 1024))}</p>
+        ) : null}
         {published ? <p className="text-xs text-stone-600">{strings.uploadLocked}</p> : null}
       </div>
 

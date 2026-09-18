@@ -113,6 +113,7 @@ export function LearnScreen({ subjectId }: { subjectId: string }) {
               <UploadPane
                 sources={authoring.sources ?? []}
                 acceptedMediaTypes={authoring.acceptedMediaTypes}
+                maxUploadBytes={authoring.maxUploadBytes}
                 published={authoring.published}
                 busy={authoring.busy}
                 strings={strings}

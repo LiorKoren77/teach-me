@@ -13,6 +13,7 @@ const status = (over: Partial<AdminSubjectStatus> = {}): AdminSubjectStatus => (
 
 const props = {
   job: null,
+  jobStale: false,
   busy: false,
   strings,
   onGenerate: () => undefined,
@@ -61,5 +62,19 @@ describe("SubjectActions", () => {
     expect(screen.getByRole("button", { name: strings.unpublish })).toBeEnabled();
     expect(screen.getByText(strings.jobLine(strings.jobKind.generate_subject, strings.jobStatus.running))).toBeInTheDocument();
     expect(screen.getByText(strings.publishedVersion(2))).toBeInTheDocument();
+  });
+
+  it("shows the stale note next to the job state once polling gave up on it", () => {
+    render(
+      <SubjectActions
+        {...props}
+        status={status({ state: "published", published_version: 2 })}
+        job={{ id: "j1", kind: "generate_subject", status: "running", attempts: 1, error: null }}
+        jobStale
+      />,
+    );
+
+    expect(screen.getByText(strings.jobLine(strings.jobKind.generate_subject, strings.jobStatus.running))).toBeInTheDocument();
+    expect(screen.getByText(strings.jobStale)).toBeInTheDocument();
   });
 });

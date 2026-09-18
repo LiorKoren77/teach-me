@@ -11,6 +11,7 @@ import type { Strings } from "@/lib/i18n";
 export function SubjectActions({
   status,
   job,
+  jobStale,
   busy,
   strings,
   onGenerate,
@@ -19,6 +20,8 @@ export function SubjectActions({
 }: {
   status: AdminSubjectStatus | null;
   job: AdminJob | null;
+  /** True once the poll gave up on `job` without it reaching done/failed. */
+  jobStale: boolean;
   busy: boolean;
   strings: Strings;
   onGenerate: () => void;
@@ -64,6 +67,7 @@ export function SubjectActions({
           {strings.jobLine(strings.jobKind[job.kind] ?? job.kind, strings.jobStatus[job.status] ?? job.status)}
         </p>
       ) : null}
+      {jobStale ? <p className="mt-1 text-xs text-amber-700">{strings.jobStale}</p> : null}
       {job?.error ? <p className="mt-1 text-xs text-red-700">{job.error}</p> : null}
 
       <div className="mt-3 flex flex-wrap gap-2">

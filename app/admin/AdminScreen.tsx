@@ -69,6 +69,7 @@ export function AdminScreen() {
               <UploadPane
                 sources={actions.sources ?? []}
                 acceptedMediaTypes={actions.acceptedMediaTypes}
+                maxUploadBytes={actions.maxUploadBytes}
                 published={actions.published}
                 busy={actions.busy}
                 strings={strings}
@@ -80,6 +81,7 @@ export function AdminScreen() {
               <SubjectActions
                 status={actions.status}
                 job={actions.job}
+                jobStale={actions.jobStale}
                 busy={actions.busy}
                 strings={strings}
                 onGenerate={actions.generate}

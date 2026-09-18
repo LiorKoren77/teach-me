@@ -69,6 +69,8 @@ export interface Strings {
   uploading: string;
   acceptedTypes: (types: string) => string;
   uploadLocked: string;
+  /** Shown when a chosen file is over the backend's `max_upload_bytes`; the picker stays usable. */
+  fileTooLarge: (maxMb: number) => string;
   noSources: string;
   deleteSource: string;
   reingestSource: string;
@@ -84,6 +86,8 @@ export interface Strings {
   jobKind: Record<string, string>;
   jobStatus: Record<string, string>;
   jobLine: (kind: string, status: string) => string;
+  /** Shown next to the job line once polling gave up on a job that never reached done/failed. */
+  jobStale: string;
   partsReady: (ready: number, total: number) => string;
   questionsReady: (n: number) => string;
   failedParts: (positions: string) => string;
@@ -121,7 +125,9 @@ const STRINGS: Record<Language, Strings> = {
     usage: { purpose: "Purpose", model: "Model", calls: "Calls", input: "Input tokens", output: "Output tokens", cost: "Cost", total: "Total" },
     uploadSources: "Upload sources", chooseFile: "Choose a file", upload: "Upload", uploading: "Uploading…",
     acceptedTypes: (types: string) => `Accepted: ${types}`,
-    uploadLocked: "A published subject is locked; unpublish it to change its sources.", noSources: "No sources yet.",
+    uploadLocked: "A published subject is locked; unpublish it to change its sources.",
+    fileTooLarge: (maxMb: number) => `That file is larger than the ${new Intl.NumberFormat("en", { maximumFractionDigits: 1 }).format(maxMb)} MB limit. Choose another file.`,
+    noSources: "No sources yet.",
     deleteSource: "Delete", reingestSource: "Re-ingest",
     confirmDelete: (filename: string) => `Delete ${filename} and everything indexed from it?`,
     confirmReingest: (filename: string) => `Ingest ${filename} again from the start?`,
@@ -130,6 +136,7 @@ const STRINGS: Record<Language, Strings> = {
     jobKind: { ingest_source: "Ingesting", generate_subject: "Generating", generate_unit: "Generating" },
     jobStatus: { queued: "Queued", running: "Running", done: "Done", failed: "Failed" },
     jobLine: (kind: string, status: string) => `${kind}: ${status}`,
+    jobStale: "Still running - check back later.",
     partsReady: (ready: number, total: number) => `${ready} of ${total} parts ready`,
     questionsReady: (n: number) => `${n} questions`,
     failedParts: (positions: string) => `Parts that failed: ${positions}`,
@@ -165,7 +172,9 @@ const STRINGS: Record<Language, Strings> = {
     usage: { purpose: "מטרה", model: "מודל", calls: "קריאות", input: "אסימוני קלט", output: "אסימוני פלט", cost: "עלות", total: "סה\"כ" },
     uploadSources: "העלאת מקורות", chooseFile: "בחירת קובץ", upload: "העלאה", uploading: "מעלים…",
     acceptedTypes: (types: string) => `סוגים נתמכים: ${types}`,
-    uploadLocked: "מקצוע שפורסם נעול; בטלו את הפרסום כדי לשנות את המקורות.", noSources: "אין עדיין מקורות.",
+    uploadLocked: "מקצוע שפורסם נעול; בטלו את הפרסום כדי לשנות את המקורות.",
+    fileTooLarge: (maxMb: number) => `הקובץ גדול מהמגבלה של ${new Intl.NumberFormat("he", { maximumFractionDigits: 1 }).format(maxMb)} מגה-בייט. בחרו קובץ אחר.`,
+    noSources: "אין עדיין מקורות.",
     deleteSource: "מחיקה", reingestSource: "עיבוד מחדש",
     confirmDelete: (filename: string) => `למחוק את ${filename} ואת כל מה שנאנדקס ממנו?`,
     confirmReingest: (filename: string) => `לעבד מחדש את ${filename} מההתחלה?`,
@@ -174,6 +183,7 @@ const STRINGS: Record<Language, Strings> = {
     jobKind: { ingest_source: "מעבד מקור", generate_subject: "יוצר תוכן", generate_unit: "יוצר תוכן" },
     jobStatus: { queued: "בתור", running: "רץ", done: "הסתיים", failed: "נכשל" },
     jobLine: (kind: string, status: string) => `${kind}: ${status}`,
+    jobStale: "עדיין רץ - בדקו שוב מאוחר יותר.",
     partsReady: (ready: number, total: number) => `${ready} מתוך ${total} חלקים מוכנים`,
     questionsReady: (n: number) => `${n} שאלות`,
     failedParts: (positions: string) => `חלקים שנכשלו: ${positions}`,
@@ -209,7 +219,9 @@ const STRINGS: Record<Language, Strings> = {
     usage: { purpose: "Finalidade", model: "Modelo", calls: "Chamadas", input: "Tokens de entrada", output: "Tokens de saída", cost: "Custo", total: "Total" },
     uploadSources: "Carregar fontes", chooseFile: "Escolher um ficheiro", upload: "Carregar", uploading: "A carregar…",
     acceptedTypes: (types: string) => `Aceites: ${types}`,
-    uploadLocked: "Uma matéria publicada está bloqueada; retire a publicação para alterar as fontes.", noSources: "Ainda não há fontes.",
+    uploadLocked: "Uma matéria publicada está bloqueada; retire a publicação para alterar as fontes.",
+    fileTooLarge: (maxMb: number) => `Esse ficheiro é maior do que o limite de ${new Intl.NumberFormat("pt", { maximumFractionDigits: 1 }).format(maxMb)} MB. Escolha outro ficheiro.`,
+    noSources: "Ainda não há fontes.",
     deleteSource: "Eliminar", reingestSource: "Reprocessar",
     confirmDelete: (filename: string) => `Eliminar ${filename} e tudo o que foi indexado a partir dele?`,
     confirmReingest: (filename: string) => `Processar ${filename} novamente desde o início?`,
@@ -218,6 +230,7 @@ const STRINGS: Record<Language, Strings> = {
     jobKind: { ingest_source: "A processar", generate_subject: "A gerar", generate_unit: "A gerar" },
     jobStatus: { queued: "Em fila", running: "Em curso", done: "Concluído", failed: "Falhou" },
     jobLine: (kind: string, status: string) => `${kind}: ${status}`,
+    jobStale: "Ainda em curso - verifique novamente mais tarde.",
     partsReady: (ready: number, total: number) => `${ready} de ${total} partes prontas`,
     questionsReady: (n: number) => `${n} perguntas`,
     failedParts: (positions: string) => `Partes que falharam: ${positions}`,
