@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+import psycopg
+import pytest
+
 from teachme.domain.models import (
     ContentStatus,
     GlossaryTerm,
@@ -13,7 +16,7 @@ from teachme.domain.models import (
 )
 from teachme.repositories.content import ContentRepository
 from teachme.repositories.glossary import GlossaryRepository
-from teachme.repositories.outlines import OutlineRepository
+from teachme.repositories.outlines import OutlineRepository, OutlineVersionConflict
 from teachme.repositories.questions import QuestionRepository
 from teachme.repositories.subjects import SubjectRepository
 
@@ -42,6 +45,18 @@ def test_outline_versions_and_structure(db):
     assert repo.get_part(parts[1].id).page_end == 9
     assert repo.get_section(sections[2].id).part_id == parts[1].id
     assert [s.position for s in repo.sections_of_outline(outline.id)] == [0, 1, 0]
+
+
+def test_outline_create_raises_conflict_on_unique_violation(db, monkeypatch):
+    subject = SubjectRepository(db).create(f"S-{uuid4()}", ["he", "en"])
+    repo = OutlineRepository(db)
+
+    def boom(*args, **kwargs):
+        raise psycopg.errors.UniqueViolation("duplicate key value violates unique constraint")
+
+    monkeypatch.setattr(db, "execute", boom)
+    with pytest.raises(OutlineVersionConflict):
+        repo.create(subject.id, model="fake-model")
 
 
 def test_glossary_terms_and_translations(db):

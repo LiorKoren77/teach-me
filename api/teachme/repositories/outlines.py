@@ -8,6 +8,10 @@ from teachme.domain.models import Outline, Part, Section
 from teachme.repositories.errors import NotFound
 
 
+class OutlineVersionConflict(Exception):
+    """Raised when a concurrent create() won the race for the next version number."""
+
+
 class OutlineNotFound(NotFound):
     entity = "outline"
 
@@ -51,15 +55,17 @@ class OutlineRepository:
         self._conn = conn
 
     def create(self, subject_id: UUID, *, model: str) -> Outline:
-        row = self._conn.execute(
-            "SELECT coalesce(max(version), 0) + 1 AS next FROM outlines WHERE subject_id = %s", (subject_id,)
-        ).fetchone()
         outline_id = uuid4()
-        self._conn.execute(
-            "INSERT INTO outlines (id, subject_id, version, model) VALUES (%s, %s, %s, %s)",
-            (outline_id, subject_id, row["next"], model),
-        )
-        return self.get(outline_id)
+        try:
+            row = self._conn.execute(
+                "INSERT INTO outlines (id, subject_id, version, model)"
+                " SELECT %s, %s, coalesce(max(version), 0) + 1, %s FROM outlines WHERE subject_id = %s"
+                " RETURNING id, subject_id, version, model",
+                (outline_id, subject_id, model, subject_id),
+            ).fetchone()
+        except psycopg.errors.UniqueViolation as exc:
+            raise OutlineVersionConflict(subject_id) from exc
+        return _outline(row)
 
     def get(self, outline_id: UUID) -> Outline:
         row = self._conn.execute(
