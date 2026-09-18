@@ -9,17 +9,11 @@ from teachme.adapters.chunk_search.pgvector import PgVectorChunkSearch
 from teachme.adapters.db.engine import connect
 from teachme.adapters.db.migrate import ensure_schema_current
 from teachme.adapters.embeddings.fake import FakeEmbedder
-from teachme.adapters.embeddings.voyage import VoyageEmbedder
 from teachme.adapters.file_store.local import LocalFileStore
 from teachme.adapters.file_store.prefixed import PrefixedFileStore
-from teachme.adapters.file_store.s3 import S3FileStore
-from teachme.adapters.file_store.vercel_blob import VercelBlobFileStore
 from teachme.adapters.job_runner.inprocess import InProcessJobRunner
-from teachme.adapters.job_runner.sqs import SqsJobRunner
-from teachme.adapters.llm.anthropic import AnthropicLLM
 from teachme.adapters.llm.fake import FakeLLM
 from teachme.adapters.reranker.noop import NoopReranker
-from teachme.adapters.reranker.voyage import VoyageReranker
 from teachme.ingestion.fake_responders import default_responders
 from teachme.ingestion.pipeline import IngestionPipeline, PipelineDeps
 from teachme.ports.embeddings import Embedder
@@ -54,18 +48,24 @@ def _secret(value) -> str | None:
 
 def build_llm(settings: Settings) -> LLMProvider:
     if settings.llm_provider == "anthropic":
+        from teachme.adapters.llm.anthropic import AnthropicLLM
+
         return AnthropicLLM(api_key=_secret(settings.anthropic_api_key))
     return FakeLLM(default_responders())
 
 
 def build_embedder(settings: Settings) -> Embedder:
     if settings.embeddings_provider == "voyage":
+        from teachme.adapters.embeddings.voyage import VoyageEmbedder
+
         return VoyageEmbedder(model=settings.embedding_model, api_key=_secret(settings.voyage_api_key))
     return FakeEmbedder()
 
 
 def build_reranker(settings: Settings) -> Reranker:
     if settings.reranker_provider == "voyage":
+        from teachme.adapters.reranker.voyage import VoyageReranker
+
         return VoyageReranker(model=settings.rerank_model, api_key=_secret(settings.voyage_api_key))
     return NoopReranker()
 
@@ -74,9 +74,13 @@ def build_file_store(settings: Settings) -> FileStore:
     if settings.file_store == "local":
         return LocalFileStore(settings.local_files_dir)
     if settings.file_store == "vercel_blob":
+        from teachme.adapters.file_store.vercel_blob import VercelBlobFileStore
+
         return VercelBlobFileStore(prefix=settings.blob_prefix, token=_secret(settings.blob_read_write_token))
     if not settings.s3_bucket:
         raise ConfigurationError("FILE_STORE=s3 requires S3_BUCKET")
+    from teachme.adapters.file_store.s3 import S3FileStore
+
     return S3FileStore(bucket=settings.s3_bucket, region=settings.aws_region)
 
 
@@ -187,6 +191,8 @@ class Container:
         if self.settings.job_runner == "sqs":
             if not self.settings.sqs_queue_url:
                 raise ConfigurationError("JOB_RUNNER=sqs requires SQS_QUEUE_URL")
+            from teachme.adapters.job_runner.sqs import SqsJobRunner
+
             return SqsJobRunner(
                 self.settings.sqs_queue_url,
                 self.settings.aws_region,

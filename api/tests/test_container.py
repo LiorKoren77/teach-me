@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import subprocess
+import sys
+
 import psycopg
 import pytest
 
@@ -7,6 +10,20 @@ from teachme.container import ConfigurationError
 from teachme.domain.models import SourceStatus
 from teachme.ingestion.detect_language import DetectedLanguage
 from tests.helpers import make_pdf
+
+
+def test_importing_container_does_not_import_vendor_sdks():
+    """anthropic, voyageai, boto3 and vercel are only needed by the adapter a deployment actually
+    selects; importing them eagerly slows down `teachme --help` and the fake stack, and requires
+    them to be installed even when unused."""
+    code = (
+        "import sys, teachme.container\n"
+        "print([m for m in ('anthropic', 'voyageai', 'boto3', 'vercel') if m in sys.modules])"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=True, timeout=30
+    )
+    assert result.stdout.strip() == "[]", result.stdout + result.stderr
 
 
 def test_container_builds_fake_stack_and_is_ready(make_container):
