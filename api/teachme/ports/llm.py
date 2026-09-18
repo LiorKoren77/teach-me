@@ -61,6 +61,9 @@ class StructuredRequest:
     parts: tuple[ContentPart, ...]
     max_tokens: int = 16000
     effort: Effort = "medium"
+    cached_context: str | None = None
+    """Large, stable text (a subject's whole corpus) placed before `system` and cached across calls.
+    Must be byte-identical between calls to hit the cache."""
 
 
 @dataclass(frozen=True)

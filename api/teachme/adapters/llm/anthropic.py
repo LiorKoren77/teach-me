@@ -48,7 +48,7 @@ class AnthropicLLM:
         with self._client.messages.stream(
             model=request.model,
             max_tokens=request.max_tokens,
-            system=[{"type": "text", "text": request.system, "cache_control": {"type": "ephemeral"}}],
+            system=_system_blocks(request),
             thinking={"type": "adaptive"},
             output_config={"effort": request.effort},
             messages=[{"role": "user", "content": [_to_block(part) for part in request.parts]}],
@@ -74,6 +74,17 @@ class AnthropicLLM:
             cache_write_tokens=message.usage.cache_creation_input_tokens or 0,
         )
         return StructuredResult(output=output, usage=usage, model=message.model)
+
+
+def _system_blocks(request: StructuredRequest) -> list[dict[str, Any]]:
+    """Cache the stable prefix. With a cached_context the instructions follow it uncached, so the
+    same corpus is reused by every generation step; without one the instructions are the prefix."""
+    if request.cached_context:
+        return [
+            {"type": "text", "text": request.cached_context, "cache_control": {"type": "ephemeral"}},
+            {"type": "text", "text": request.system},
+        ]
+    return [{"type": "text", "text": request.system, "cache_control": {"type": "ephemeral"}}]
 
 
 def _to_block(part: ContentPart) -> dict[str, Any]:

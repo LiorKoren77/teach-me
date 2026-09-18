@@ -116,3 +116,29 @@ def test_document_part_without_data_raises():
     )
     with pytest.raises(ValueError, match="document"):
         AnthropicLLM(client=_StubClient(_message())).generate_structured(request, Answer)
+
+
+def test_cached_context_becomes_first_system_block_with_cache_control():
+    client = _StubClient(_message())
+    request = StructuredRequest(
+        purpose="t",
+        model="claude-opus-5",
+        system="instructions",
+        parts=(ContentPart.of_text("x"),),
+        cached_context="<corpus>big text</corpus>",
+    )
+    AnthropicLLM(client=client).generate_structured(request, Answer)
+    system = client.calls[0]["system"]
+    assert system[0] == {
+        "type": "text",
+        "text": "<corpus>big text</corpus>",
+        "cache_control": {"type": "ephemeral"},
+    }
+    assert system[1] == {"type": "text", "text": "instructions"}
+
+
+def test_without_cached_context_the_single_system_block_is_cached():
+    client = _StubClient(_message())
+    AnthropicLLM(client=client).generate_structured(_request(), Answer)
+    system = client.calls[0]["system"]
+    assert len(system) == 1 and system[0]["cache_control"] == {"type": "ephemeral"}

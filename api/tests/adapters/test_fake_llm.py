@@ -37,3 +37,11 @@ def test_set_responder_installs_and_replaces_a_responder():
     assert fake.generate_structured(_req("x"), Out).output.echo == "first"
     fake.set_responder(Out, lambda req: Out(echo="second"))
     assert fake.generate_structured(_req("x"), Out).output.echo == "second"
+
+
+def test_fake_records_cached_context():
+    fake = FakeLLM({Out: lambda req: Out(echo=req.cached_context or "")})
+    req = StructuredRequest(
+        purpose="t", model="m", system="s", parts=(ContentPart.of_text("x"),), cached_context="C"
+    )
+    assert fake.generate_structured(req, Out).output.echo == "C"
