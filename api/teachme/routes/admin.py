@@ -14,33 +14,13 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 @router.get("/subjects", response_model=list[AdminSubject])
 def subjects(user: AdminUser, scope: ScopeDep) -> list[AdminSubject]:
-    return [
-        AdminSubject(
-            id=s.id,
-            name=s.name,
-            state=s.state.value,
-            languages=s.languages,
-            current_outline_version=s.current_outline_version,
-        )
-        for s in scope.subjects.list()
-    ]
+    return [AdminSubject.of(s) for s in scope.subjects.list()]
 
 
 @router.get("/subjects/{subject_id}/sources", response_model=list[AdminSource])
 def sources(subject_id: UUID, user: AdminUser, scope: ScopeDep) -> list[AdminSource]:
     scope.subjects.get(subject_id)  # 404 instead of an empty list for a subject that is not there
-    return [
-        AdminSource(
-            id=s.id,
-            filename=s.filename,
-            media_type=s.media_type,
-            status=s.status.value,
-            page_count=s.page_count,
-            detected_language=s.detected_language,
-            error=s.error,
-        )
-        for s in scope.sources.list_by_subject(subject_id)
-    ]
+    return [AdminSource.of(s) for s in scope.sources.list_by_subject(subject_id)]
 
 
 @router.get("/usage", response_model=list[UsageSummaryRow])

@@ -199,7 +199,9 @@ python-dotenv==1.2.3
     #   pydantic-settings
     #   vercel
 python-multipart==0.0.32
-    # via vercel-queue
+    # via
+    #   teach-me (pyproject.toml)
+    #   vercel-queue
 pyyaml==6.0.3
     # via
     #   huggingface-hub

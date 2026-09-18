@@ -13,6 +13,10 @@ class TooManyPages(IngestionError):
     pass
 
 
+class UploadTooLarge(IngestionError):
+    pass
+
+
 class ExtractionError(IngestionError):
     pass
 

@@ -178,6 +178,15 @@ without it every token is treated as a student, since a missing `role` claim fal
 | GET | `/api/admin/subjects` | admin | List every subject regardless of publication state. |
 | GET | `/api/admin/subjects/{subject_id}/sources` | admin | List a subject's ingested sources and their status. |
 | GET | `/api/admin/usage` | admin | Model/embedding usage and cost summary, optionally filtered by `subject_id`. |
+| GET | `/api/admin/capabilities` | admin | What the file picker may offer: the media types this deployment's LLM adapter can read (narrowed by `ALLOWED_UPLOAD_TYPES`) and `MAX_UPLOAD_BYTES`. |
+| POST | `/api/admin/subjects/{subject_id}/sources` | admin | Upload one file (multipart field `file`) to a draft subject: registers it and queues its ingestion. Answers with the source plus the `job_id`. `415` for a type that cannot be read, `413` for a body over `MAX_UPLOAD_BYTES`, `409` when the subject is published. |
+| DELETE | `/api/admin/sources/{source_id}` | admin | Remove a source, its pages, figures, chunks, thumbnails and file. `204` with no body; `409` when the subject is published. |
+| POST | `/api/admin/sources/{source_id}/reingest` | admin | Re-run a source through the pipeline from the start; answers with the `job_id`. |
+| GET | `/api/admin/jobs/{job_id}` | admin | One job's `kind`, `status` (`queued`/`running`/`done`/`failed`), `attempts` and `error` - what the upload pane polls. |
+| POST | `/api/admin/subjects/{subject_id}/generate` | admin | Queue a `generate_subject` job for a draft subject; answers with the `job_id`. |
+| GET | `/api/admin/subjects/{subject_id}/status` | admin | `TutorialService.status` for the pane: per-language parts ready, questions, failed parts, and whether (and which version) it can publish. |
+| POST | `/api/admin/subjects/{subject_id}/publish` | admin | Publish the newest complete outline version; answers with the updated subject. |
+| POST | `/api/admin/subjects/{subject_id}/unpublish` | admin | Return the subject to draft; answers with the updated subject. |
 | POST | `/api/jobs/run` | the deployment itself | Runs one unit of a queued job. No Clerk session: the only credential is the `x-job-secret` header, compared against `JOB_RUNNER_SECRET` in constant time. See "Background jobs". |
 
 The `RenderedPart` a `/start` (or a learn route) returns carries `page_refs`: the global page
@@ -186,6 +195,20 @@ than scraped out of the prose. They are exactly the indices `GET /api/subjects/{
 takes, so the client can show a page thumbnail next to the text without parsing it; the prose
 itself names pages by their printed number, which is not a corpus index.
 
+
+### Admin upload
+
+The admin pane does over HTTP exactly what the CLI does: `POST .../sources` calls the same
+`SourceService.register` and queues the same `ingest_source` job as `teachme ingest`, so no part
+of ingestion knows which of the two put the file there. An upload is refused before its body is
+stored when `Content-Length` exceeds `MAX_UPLOAD_BYTES` (`413`), and refused by the service when
+the type is one the configured LLM adapter cannot read (`415`) or the subject is published
+(`409`) - a published subject is locked against upload, delete, reingest and generate, though its
+sources stay visible. The response carries the registered source and the `job_id` to poll at
+`GET /api/admin/jobs/{job_id}`; the pane follows the source's own status rather than that job,
+because ingestion is resumable and behind the `vercel_function` runner takes several jobs to
+finish. Generate, publish and unpublish are the same `TutorialService` calls `teachme tutorial`
+makes, and `.../status` prints the same numbers `teachme tutorial status` does.
 
 ### Background jobs
 
@@ -227,6 +250,8 @@ wins when one refusal subclasses another):
 | 409 | `QuestionClosed` | A `LearningError` subclass: the question is not open for answering - it already carries a grade, or it belongs to another attempt. A conflict with the state of the round, which is why it is not the `403` a foreign attempt gets. |
 | 409 | `InvalidChoice` | A `LearningError` subclass: a multiple-choice submission that is not one of the question's options - no choice at all, or an index past the last one (the route refuses a negative index as a `422`). |
 | 409 | `UnmappedQuestion` | An answered row referencing a question that is no longer in the part's bank. The foreign key cascades, so this is a guard rather than a path a request normally takes - but it names the row instead of surfacing as a `500`. |
+| 413 | `UploadTooLarge` | An admin upload whose `Content-Length` (or, for a chunked body, whose bytes) exceeds `MAX_UPLOAD_BYTES`. Refused before the file is stored. |
+| 415 | `UnsupportedMediaType` | An upload whose type the configured LLM adapter cannot read, or which `ALLOWED_UPLOAD_TYPES` excludes. `GET /api/admin/capabilities` lists what it would accept. |
 | 422 | *(FastAPI's built-in request validation, not in this table)* | A malformed request body - e.g. `AnswerRequest` requires exactly one of `answer_text`/`answer_choice`, and rejects neither or both. |
 
 Anything not listed here is a bug and stays a `500` with no detail, so internals never leak to

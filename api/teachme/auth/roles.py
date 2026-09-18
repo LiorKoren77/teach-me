@@ -8,8 +8,9 @@ from teachme.auth.clerk import ADMIN, CurrentUser, UserContext, require_role
 
 
 def require_admin(user: CurrentUser) -> UserContext:
-    """Admin routes are read-only, but they read every subject and every price, so the role is
-    checked here rather than route by route."""
+    """Admin routes read every subject and every price, and change what a subject teaches -
+    upload, delete, reingest, generate, publish - so the role is checked here, once, rather than
+    route by route."""
     return require_role(user, ADMIN)
 
 
