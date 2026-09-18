@@ -3,13 +3,13 @@ from __future__ import annotations
 import logging
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from teachme.domain.models import ContentStatus
 from teachme.generation.errors import GenerationError
 from teachme.ports.job_runner import JobPayload, JobRunner
 from teachme.repositories.subjects import SubjectRepository
-from teachme.services.tutorial import GenerationUnit, TutorialService
+from teachme.services.tutorial import GenerationUnit, TutorialService, UnitKind
 
 log = logging.getLogger(__name__)
 
@@ -32,6 +32,17 @@ class GenerateUnitJob(BaseModel):
 
     unit: GenerationUnit
 
+    @field_validator("unit")
+    @classmethod
+    def _only_parts(cls, unit: GenerationUnit) -> GenerationUnit:
+        """The outline unit is the only one that may create a version, so it belongs to the
+        `generate_subject` handler, which resolves that decision once and pins every part to the
+        version it produced. Carrying one in a job of its own would create a second version on
+        every delivery, which is exactly what the fan-out is built to avoid."""
+        if unit.kind is not UnitKind.PART:
+            raise ValueError(f"{GENERATE_UNIT} carries a PART unit, not {unit.kind.value!r}")
+        return unit
+
 
 def run_generate_subject(
     payload: JobPayload, *, service: TutorialService, subjects: SubjectRepository, runner: JobRunner
@@ -44,8 +55,11 @@ def run_generate_subject(
     languages = list(job.languages) or None
     parts = list(job.parts) or None
     plan = service.plan_generation(subject, languages=languages, parts=parts, content_only=job.content_only)
-    service.run_unit(plan[0])
-    for unit in service.plan_part_units(subject, languages=languages, parts=parts):
+    outline = service.run_unit(plan[0]).outline
+    assert outline is not None  # an outline unit created or reused a version, or it raised
+    for unit in service.plan_part_units(
+        subject, languages=languages, parts=parts, outline_version=outline.version
+    ):
         try:
             runner.enqueue(GENERATE_UNIT, GenerateUnitJob(unit=unit).model_dump(mode="json"))
         except Exception:
@@ -60,6 +74,6 @@ def run_generate_unit(payload: JobPayload, *, service: TutorialService) -> None:
     and returns rather than raising, so that a whole run survives one bad part; a job has to say so
     in its own row, which is what the raise below is for."""
     unit = GenerateUnitJob.model_validate(payload).unit
-    result = service.run_unit(unit)
+    result = service.run_unit(unit).part
     if result is not None and result.content_status is not ContentStatus.READY:
         raise GenerationError(result.error or f"part {unit.part_position} [{unit.language}] failed")

@@ -56,6 +56,17 @@ class PartLanguageResult(BaseModel):
     error: str | None = None
 
 
+class UnitResult(BaseModel):
+    """What running one unit produced. An OUTLINE unit answers with the outline version it created
+    or reused, which is what the caller pins that run's part units to; a PART unit answers with its
+    own per-language result. Exactly one of the two is set, by the unit's kind."""
+
+    model_config = ConfigDict(frozen=True)
+
+    outline: Outline | None = None
+    part: PartLanguageResult | None = None
+
+
 class GenerationReport(BaseModel):
     subject: str
     outline_version: int
@@ -199,14 +210,12 @@ class TutorialService:
         learns its parts by creating them."""
         plan = self.plan_generation(subject, languages=languages, parts=parts, content_only=content_only)
         outline_unit = plan[0]
-        self.run_unit(outline_unit)
-        results = [
-            result
-            for unit in self.plan_part_units(subject, languages=languages, parts=parts)
-            if (result := self.run_unit(unit)) is not None
-        ]
-        outline = self._outlines.latest(subject.id)
+        outline = self.run_unit(outline_unit).outline
         assert outline is not None  # the outline unit created or reused one, or it raised
+        part_units = self.plan_part_units(
+            subject, languages=languages, parts=parts, outline_version=outline.version
+        )
+        results = [result for unit in part_units if (result := self.run_unit(unit).part) is not None]
         return GenerationReport(
             subject=subject.name,
             outline_version=outline.version,
@@ -254,11 +263,19 @@ class TutorialService:
         *,
         languages: Sequence[str] | None = None,
         parts: Sequence[int] | None = None,
+        outline_version: int | None = None,
     ) -> list[GenerationUnit]:
-        """One unit per part and language against the subject's current outline version. Called
-        after an outline unit has run, which is when a new version's parts become known."""
+        """One unit per part and language against one outline version. Called after an outline unit
+        has run, which is when a new version's parts become known - so the caller passes the
+        version that unit answered with. Falling back to the newest version is only safe when no
+        outline unit ran: another run that created a version in between would otherwise steal these
+        parts, pinning them to an outline this run never produced."""
         chosen_languages = self._chosen_languages(subject, languages)
-        outline = self._outlines.latest(subject.id)
+        outline = (
+            self._outlines.latest(subject.id)
+            if outline_version is None
+            else self._outlines.get_version(subject.id, outline_version)
+        )
         wanted = self._wanted_parts(outline, parts)
         if outline is None:
             return []
@@ -274,21 +291,20 @@ class TutorialService:
             for part in wanted
         ]
 
-    def run_unit(self, unit: GenerationUnit) -> PartLanguageResult | None:
-        """Runs one unit to completion and commits it: the part's result for a PART unit, None for
-        an OUTLINE one. A part the model could not produce comes back as a FAILED result rather
-        than an exception, exactly as it does inside a whole run; anything else rolls the
-        transaction back and propagates, so nothing half-written - an outline version without its
-        glossary, above all - survives for a later commit to keep."""
+    def run_unit(self, unit: GenerationUnit) -> UnitResult:
+        """Runs one unit to completion and commits it, answering with what it produced: the outline
+        version for an OUTLINE unit, the part's result for a PART one. A part the model could not
+        produce comes back as a FAILED result rather than an exception, exactly as it does inside a
+        whole run; anything else rolls the transaction back and propagates, so nothing half-written
+        - an outline version without its glossary, above all - survives for a later commit to keep."""
         subject = self._subjects.get(unit.subject_id)
         if subject.state == SubjectState.PUBLISHED:
             raise SubjectLocked(f"subject {subject.name!r} is published; unpublish before generating")
         try:
             with usage_context(subject_id=subject.id):
                 if unit.kind is UnitKind.OUTLINE:
-                    self._run_outline_unit(subject, unit)
-                    return None
-                return self._run_part_unit(subject, unit)
+                    return UnitResult(outline=self._run_outline_unit(subject, unit))
+                return UnitResult(part=self._run_part_unit(subject, unit))
         except Exception:
             self._conn.rollback()
             raise

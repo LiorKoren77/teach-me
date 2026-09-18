@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from teachme.container import Container
 from teachme.domain.models import ContentStatus, SubjectState
@@ -425,7 +427,7 @@ def test_run_unit_for_a_part_replaces_its_content_without_a_new_version(containe
         part_position=0,
         language="he",
     )
-    result = container.tutorial_service.run_unit(unit)
+    result = container.tutorial_service.run_unit(unit).part
     assert result is not None
     assert result.content_status is ContentStatus.READY and result.part_position == 0
 
@@ -496,3 +498,30 @@ def test_a_failing_unit_is_recorded_on_its_own_job_and_leaves_the_others_alone(c
         assert content is not None
         expected = ContentStatus.FAILED if part.position == broken.part_position else ContentStatus.READY
         assert content.status is expected
+
+
+def test_interleaved_runs_pin_their_part_units_to_the_version_they_created(container):
+    """Two runs of the same subject, on two connections, overlapping. The second one creates a
+    newer outline version before the first has planned its parts: what pins the first run's parts
+    is the version its own outline unit produced, not whatever `latest()` says by then."""
+    subject = _ingested_subject(container, languages=("he",))
+    other = Container(container.settings)
+    try:
+        first, second = container.tutorial_service, other.tutorial_service
+        mine = first.run_unit(first.plan_generation(subject)[0]).outline
+        theirs = second.run_unit(second.plan_generation(subject)[0]).outline
+        assert (mine.version, theirs.version) == (1, 2)
+
+        my_units = first.plan_part_units(subject, outline_version=mine.version)
+        their_units = second.plan_part_units(subject, outline_version=theirs.version)
+        assert my_units and {u.outline_version for u in my_units} == {1}
+        assert their_units and {u.outline_version for u in their_units} == {2}
+    finally:
+        other.close()
+
+
+def test_a_generate_unit_job_refuses_an_outline_unit():
+    """The outline unit is the one unit that may create a version; it belongs to the subject-level
+    handler, which resolves that decision once. A job that carried it would create a second."""
+    with pytest.raises(ValidationError, match="PART"):
+        GenerateUnitJob(unit=GenerationUnit(kind=UnitKind.OUTLINE, subject_id=uuid4()))
