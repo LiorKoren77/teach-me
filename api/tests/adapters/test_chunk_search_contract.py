@@ -88,7 +88,7 @@ def test_lexical_quotes_tokens_so_odd_characters_cannot_break_tsquery(search_env
     search, subject_id, source_id, other_source = search_env
     r1 = _record(subject_id, source_id, "the biosphere", ["biosphere"], _unit(0))
     search.upsert([r1])
-    hits = search.lexical(subject_id, ["&", "", "x'y", "biosphere"], k=5)
+    hits = search.lexical(subject_id, ["&", "", "x'y", "a\\", "biosphere"], k=5)
     assert {h.chunk_id for h in hits} == {r1.id}
 
 

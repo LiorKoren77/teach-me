@@ -107,7 +107,7 @@ class PgVectorChunkSearch:
     def lexical(self, subject_id: UUID, tokens: Sequence[str], k: int) -> list[ChunkHit]:
         if not tokens:
             return []
-        query = " | ".join("'" + t.replace("'", "''") + "'" for t in tokens if t)
+        query = " | ".join("'" + t.replace("\\", "\\\\").replace("'", "''") + "'" for t in tokens if t)
         if not query:
             return []
         rows = self._conn.execute(
