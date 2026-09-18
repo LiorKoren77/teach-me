@@ -47,11 +47,13 @@ def render_brief(
     sections: Sequence[Section],
     terms: Sequence[GlossaryTerm],
     translations: Mapping[str, str],
-    corpus: SubjectCorpus,
     language: str,
 ) -> str:
-    """The user message: what to teach, where it is, and which terms to wrap. Machine-readable
-    line prefixes (PART, PAGES, SECTION n, TERM) are relied on by the fake responders."""
+    """The user message: what to teach, where it is, and which terms to wrap. The part's own pages
+    are named by the PAGES line, not re-sent here - they are already in the cached corpus (see
+    cached_context in generate_teaching), so repeating them would pay uncached input price for
+    text the model already has. Machine-readable line prefixes (PART, PAGES, SECTION n, TERM) are
+    relied on by the fake responders."""
     lines = [
         f"PART: {part.title}",
         f"PAGES: {part.page_start}-{part.page_end}",
@@ -59,9 +61,6 @@ def render_brief(
     ]
     lines += [f"SECTION {s.position}: {s.title} (pages {s.page_start}-{s.page_end})" for s in sections]
     lines += [f"TERM: {t.slug} | {t.source_term} | {translations.get(t.slug, t.source_term)}" for t in terms]
-    lines.append("")
-    lines.append("The part's pages, for focus (the full corpus is available for context):")
-    lines.append(corpus.render(part.page_start, part.page_end))
     return "\n".join(lines)
 
 
@@ -80,7 +79,7 @@ def generate_teaching(
         purpose="gen.teaching",
         model=model,
         system=load_prompt("teaching").format(subject=subject_name, language=f'"{language}"'),
-        parts=(ContentPart.of_text(render_brief(part, sections, terms, translations, corpus, language)),),
+        parts=(ContentPart.of_text(render_brief(part, sections, terms, translations, language)),),
         cached_context=corpus.render(),
         max_tokens=TEACHING_MAX_TOKENS,
         effort="high",

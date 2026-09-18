@@ -64,11 +64,14 @@ def test_validate_teaching():
 
 def test_render_brief_lists_sections_and_glossary_and_pages():
     part, sections, terms = _structure()
-    brief = render_brief(part, sections, terms, {"biosphere": "ביוספרה"}, _corpus(4), "he")
+    brief = render_brief(part, sections, terms, {"biosphere": "ביוספרה"}, "he")
     assert "PART: Intro" in brief and "PAGES: 0-3" in brief
     assert "SECTION 0: What (pages 0-1)" in brief and "SECTION 1: Why (pages 2-3)" in brief
     assert "TERM: biosphere | biosfera | ביוספרה" in brief
-    assert '<page index="3"' in brief and '<page index="4"' not in brief
+    # The part's pages aren't re-sent in the brief - they're read from the cached corpus by the
+    # global page indices the PAGES line already gives, not repeated here at uncached price.
+    assert "<page index=" not in brief
+    assert '<page index="3"' in _corpus(4).render()
 
 
 def test_generate_teaching_uses_cached_corpus_and_language():
