@@ -323,7 +323,10 @@ def tutorial_status(subject: str = typer.Option(..., "--subject", "-s")) -> None
             if lang.failed:
                 line += f", failed: {list(lang.failed)}"
             typer.echo(line)
-        typer.echo(f"publishable: {'yes' if status.publishable else 'no'}")
+        if status.publishable_version is not None:
+            typer.echo(f"publishable: yes (v{status.publishable_version})")
+        else:
+            typer.echo("publishable: no")
 
     _run(body)
 

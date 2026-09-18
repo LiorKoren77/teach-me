@@ -215,6 +215,29 @@ def test_publish_picks_the_newest_complete_version(container):
     assert published.state == SubjectState.PUBLISHED and published.current_outline_version == 1
 
 
+def test_status_reports_the_version_publish_would_select(container):
+    subject = _ingested_subject(container)
+    container.tutorial_service.generate(subject)
+    assert container.tutorial_service.status(subject).publishable_version == 1
+
+    teaching = default_responders()[TeachingOut]
+
+    def fail_in_english(request):
+        text = "\n".join(part.text or "" for part in request.parts if part.kind == "text")
+        if "LANGUAGE: en" in text:
+            raise LLMError("teaching service down")
+        return teaching(request)
+
+    container.llm.inner.set_responder(TeachingOut, fail_in_english)
+    report = container.tutorial_service.generate(subject)
+    assert report.outline_version == 2 and report.failures
+
+    status = container.tutorial_service.status(subject)
+    assert status.outline_version == 2
+    assert status.publishable is False
+    assert status.publishable_version == 1
+
+
 def test_status_reports_per_part_readiness_and_failed_parts(container):
     subject = _ingested_subject(container)
     container.tutorial_service.generate(subject)

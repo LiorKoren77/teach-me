@@ -82,6 +82,7 @@ class TutorialStatus(BaseModel):
     parts: int
     languages: list[LanguageStatus]
     publishable: bool
+    publishable_version: int | None = None
 
 
 class GlossaryEntry(BaseModel):
@@ -398,20 +399,9 @@ class TutorialService:
         return questions
 
     # status and publishing ------------------------------------------------------------------
-    def status(self, subject: Subject, outline: Outline | None = None) -> TutorialStatus:
-        """Readiness of one outline version; the latest one unless a version is given."""
-        if outline is None:
-            outline = self._outlines.latest(subject.id)
-        if outline is None:
-            return TutorialStatus(
-                subject=subject.name,
-                state=subject.state,
-                outline_version=None,
-                published_version=subject.current_outline_version,
-                parts=0,
-                languages=[],
-                publishable=False,
-            )
+    def _evaluate(self, subject: Subject, outline: Outline) -> TutorialStatus:
+        """Per-language readiness of one outline version. publishable_version is left unset here:
+        it depends on every version, not just this one - callers that need it fill it in."""
         parts = self._outlines.parts(outline.id)
         ready = self._content.languages_ready(outline.id)
         failed = self._content.languages_failed(outline.id)
@@ -444,6 +434,41 @@ class TutorialService:
             publishable=bool(parts) and all(lang.complete for lang in languages),
         )
 
+    def _find_publishable(self, subject: Subject) -> tuple[TutorialStatus | None, TutorialStatus | None]:
+        """Walk outline versions newest-first, exactly as `publish` would: the first complete one
+        wins. Returns (the newest version's evaluation, the first publishable one), either of
+        which may be None when the subject has no outline at all or nothing is publishable."""
+        latest: TutorialStatus | None = None
+        found: TutorialStatus | None = None
+        for outline in self._outlines.versions(subject.id):
+            candidate = self._evaluate(subject, outline)
+            latest = latest or candidate
+            if candidate.publishable:
+                found = candidate
+                break
+        return latest, found
+
+    def status(self, subject: Subject, outline: Outline | None = None) -> TutorialStatus:
+        """Readiness of one outline version; the latest one unless a version is given.
+        publishable_version names the version `publish` would actually select, which may be an
+        older one than the version detailed here."""
+        if outline is None:
+            outline = self._outlines.latest(subject.id)
+        if outline is None:
+            return TutorialStatus(
+                subject=subject.name,
+                state=subject.state,
+                outline_version=None,
+                published_version=subject.current_outline_version,
+                parts=0,
+                languages=[],
+                publishable=False,
+                publishable_version=None,
+            )
+        target = self._evaluate(subject, outline)
+        _, found = self._find_publishable(subject)
+        return target.model_copy(update={"publishable_version": found.outline_version if found else None})
+
     def on_version_published(self, listener: VersionListener) -> None:
         """Stage 3 registers the progress reset here; called only when the published version changes."""
         self._listeners.append(listener)
@@ -451,14 +476,7 @@ class TutorialService:
     def publish(self, subject: Subject) -> Subject:
         """Publish the newest complete version. A draft regeneration that is still incomplete (or
         failed) therefore never blocks publishing, and never unpublishes what students are using."""
-        latest: TutorialStatus | None = None
-        status: TutorialStatus | None = None
-        for outline in self._outlines.versions(subject.id):
-            candidate = self.status(subject, outline)
-            latest = latest or candidate
-            if candidate.publishable:
-                status = candidate
-                break
+        latest, status = self._find_publishable(subject)
         if status is None:
             incomplete = (
                 [lang.language for lang in latest.languages if not lang.complete] if latest else []
