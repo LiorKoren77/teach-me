@@ -35,6 +35,7 @@ class AnthropicLLM:
     and always requests structured output so callers get a validated pydantic object."""
 
     name = "anthropic"
+    MEDIA_TYPES = MEDIA_TYPES
 
     def __init__(self, client: Anthropic | None = None, api_key: str | None = None) -> None:
         # api_key None lets the SDK resolve ANTHROPIC_API_KEY or federation from the environment.

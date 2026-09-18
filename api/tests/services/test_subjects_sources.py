@@ -4,6 +4,7 @@ import pytest
 
 from teachme.adapters.chunk_search.memory import InMemoryChunkSearch
 from teachme.adapters.file_store.memory import InMemoryFileStore
+from teachme.adapters.llm.anthropic import AnthropicLLM
 from teachme.adapters.llm.fake import FakeLLM
 from teachme.domain.models import SourceStatus, SubjectState
 from teachme.ingestion.errors import SubjectLocked, UnsupportedMediaType
@@ -50,6 +51,18 @@ def test_source_register_validates_type_and_stores_file(services):
     assert [s.id for s in source_service.list(subject)] == [source.id]
     with pytest.raises(UnsupportedMediaType):
         source_service.register(subject, "archive.zip", b"PK")
+
+
+def test_media_type_for_webp_and_gzipped_files():
+    assert SourceService.media_type_for("a.webp") == "image/webp"
+    assert SourceService.media_type_for("doc.pdf.gz") is None
+
+
+def test_media_type_for_covers_every_llm_capability():
+    extensions = [".pdf", ".png", ".jpg", ".gif", ".webp", ".txt", ".md"]
+    produced = {SourceService.media_type_for(f"file{ext}") for ext in extensions}
+    for media_type in AnthropicLLM.MEDIA_TYPES:
+        assert media_type in produced
 
 
 def test_settings_can_narrow_accepted_types(db):

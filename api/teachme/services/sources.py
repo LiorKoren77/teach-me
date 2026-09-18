@@ -14,7 +14,12 @@ from teachme.repositories.sources import SourceRepository
 from teachme.repositories.subjects import SubjectRepository
 from teachme.settings import Settings
 
-_EXTRA_TYPES = {".md": "text/markdown", ".markdown": "text/markdown", ".txt": "text/plain"}
+_EXTRA_TYPES = {
+    ".md": "text/markdown",
+    ".markdown": "text/markdown",
+    ".txt": "text/plain",
+    ".webp": "image/webp",
+}
 # A private table: mimetypes.guess_type() also reads the host's /etc/mime.types, which would
 # make the accepted upload types differ between a developer machine and the server.
 _MIME = mimetypes.MimeTypes()
@@ -54,8 +59,8 @@ class SourceService:
         for suffix, media_type in _EXTRA_TYPES.items():
             if lower.endswith(suffix):
                 return media_type
-        guessed, _ = _MIME.guess_type(lower)
-        return guessed
+        guessed, encoding = _MIME.guess_type(lower)
+        return None if encoding else guessed
 
     def register(self, subject: Subject, filename: str, data: bytes) -> Source:
         self._require_draft(subject)
