@@ -15,7 +15,7 @@ import { usePageImages } from "@/hooks/usePageImage";
 import { useReexplainStream } from "@/hooks/useReexplainStream";
 import { useSources, useSubjects } from "@/hooks/useSubjects";
 import { directionOf, t } from "@/lib/i18n";
-import { extractPageRefs } from "@/lib/pageRefs";
+import { pageRefsOf } from "@/lib/pageRefs";
 
 // The screen from the spec: subject tabs and the part strip on top, the teaching text above the
 // tutor dialog in the main column, the sources on the right, stacked on narrow screens. It holds
@@ -31,8 +31,8 @@ export function LearnScreen({ subjectId }: { subjectId: string }) {
   const attemptId = session?.attempt_id ?? null;
   const reinforcing = roundResult?.status === "reinforcing";
   const stream = useReexplainStream(attemptId, roundResult?.round_no ?? null, reinforcing && attemptId !== null);
-  const body = session?.part.body ?? "";
-  const pageRefs = useMemo(() => extractPageRefs(body), [body]);
+  const part = session?.part;
+  const pageRefs = useMemo(() => pageRefsOf(part), [part]);
   const pageUrls = usePageImages(subjectId, pageRefs);
   const figures = useMemo(() => pageRefs.map((page) => ({ page, src: pageUrls[page] ?? null })), [pageRefs, pageUrls]);
 

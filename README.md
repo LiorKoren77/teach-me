@@ -72,9 +72,9 @@ because path matching can diverge from routing, so each protected page also chec
 `/learn/[subjectId]` is that kind of page: a server component that calls `await auth.protect()`
 before rendering the client screen - subject tabs and the part strip on top, the teaching text
 above the tutor dialog, the sources on the right, stacked on narrow screens. Two contracts in it
-are worth naming. Page references are derived, not served: `lib/pageRefs.ts` scans the teaching
-body for "page N", "עמוד N" and "página N" and shows a thumbnail for each, until the backend
-returns them structurally. The thumbnail images come from `/api/subjects/{id}/pages/{n}/image`,
+are worth naming. Page references come from the part: `page_refs` on the rendered part holds the
+global 0-based page indices to show thumbnails for, and `lib/pageRefs.ts` falls back to scanning
+the body for "page N", "עמוד N" and "página N" for a part rendered before that field existed. The thumbnail images come from `/api/subjects/{id}/pages/{n}/image`,
 which accepts a bearer token only - an `<img src>` cannot send one, so `hooks/usePageImage.ts`
 fetches each page through the API client and hands the browser an object URL instead. And
 the re-explanation shows a waiting notice until its first event, because the API generates the
