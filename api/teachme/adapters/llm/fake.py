@@ -27,10 +27,11 @@ DEFAULT_MEDIA_TYPES = frozenset({"application/pdf", "image/png", "image/jpeg", "
 class FakeLLM:
     """Deterministic stand-in: one responder per output schema. Records every request.
 
-    `teachme.ingestion.fake_responders.default_responders()` and
-    `teachme.generation.fake_responders.default_responders()` provide responders for the
-    ingestion and generation schemas respectively, so the whole pipeline runs without an API
-    key; see `teachme.container.build_llm` for how the fake stack combines them."""
+    `default_responders()` in `teachme.ingestion.fake_responders`,
+    `teachme.generation.fake_responders` and `teachme.grading.fake_responders` provide responders
+    for the ingestion, generation and grading schemas respectively, so the whole pipeline - the
+    learning loop included - runs without an API key; see `teachme.container.build_llm` for how
+    the fake stack combines them."""
 
     name = "fake"
 

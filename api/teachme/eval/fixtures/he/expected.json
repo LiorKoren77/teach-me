@@ -1,0 +1,28 @@
+{
+  "language": "he",
+  "teach_in": ["he", "en"],
+  "outline": {"min_parts": 1, "max_parts": 3, "min_sections": 1},
+  "answers": [
+    {
+      "question_contains": "אידוי",
+      "answer": "החום מן השמש מעניק למולקולות שעל פני המים מספיק אנרגיה כדי להשתחרר מן הנוזל ולעלות אל האוויר כאדי מים, ורוב האדים שבאטמוספרה מתאדים מן האוקיינוסים.",
+      "expected_grade": "correct"
+    },
+    {
+      "question_contains": "עיבוי",
+      "answer": "עיבוי הוא כשהגשם נופל מן הענן ישר אל הים.",
+      "expected_grade": "incorrect"
+    },
+    {
+      "question_contains": "",
+      "answer": "אני אוהב כדורגל וצפיתי אתמול במשחק עם אחי.",
+      "expected_grade": "off_topic",
+      "expected_route": "check"
+    },
+    {
+      "question_contains": "",
+      "answer": "",
+      "expected_grade": "junk"
+    }
+  ]
+}

@@ -4,13 +4,13 @@ import re
 
 from pydantic import BaseModel
 
-from teachme.adapters.llm.fake import Responder
+from teachme.adapters.llm.fake import Responder, TextResponder
 from teachme.domain.models import QuestionKind
 from teachme.generation.glossary import GlossaryOut, GlossaryTranslationOut, TermOut, TranslationOut
 from teachme.generation.outline import OutlineOut, PartOut, SectionOut
 from teachme.generation.question_bank import QuestionBankOut, QuestionOut
 from teachme.generation.teaching import SectionContentOut, TeachingOut
-from teachme.ports.llm import StructuredRequest
+from teachme.ports.llm import StructuredRequest, TextRequest
 
 _ALL_PAGES = re.compile(r"all (\d+) pages")
 _PAGE_RANGE = re.compile(r"pages (\d+)-(\d+)")
@@ -158,6 +158,19 @@ def _questions(request: StructuredRequest) -> BaseModel:
             correct_choice=1,
         )
     return QuestionBankOut(questions=questions)
+
+
+def default_text_responder() -> TextResponder:
+    """The one free-text call in the app is the re-explanation; the fake one re-teaches nothing
+    but is shaped like the real thing, so the loop runs to the end without an API key."""
+
+    def respond(request: TextRequest) -> str:
+        sections = [m.group(2) for m in _SECTION.finditer("\n".join(p.text or "" for p in request.parts))]
+        titles = sections or ["this part"]
+        body = "\n\n".join(f"## Again: {title}\n\nFake re-explanation sentence. " * 3 for title in titles)
+        return f"{body}\n"
+
+    return respond
 
 
 def default_responders() -> dict[type[BaseModel], Responder]:

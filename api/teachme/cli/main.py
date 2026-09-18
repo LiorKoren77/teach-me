@@ -10,6 +10,8 @@ import typer
 from teachme.adapters.db.migrate import SchemaOutOfDate, apply_migrations, ensure_schema_current
 from teachme.container import ConfigurationError, Container
 from teachme.domain.models import Source
+from teachme.eval.fixtures import FixtureError
+from teachme.eval.runner import EvalRunner
 from teachme.generation.errors import GenerationError
 from teachme.ingestion.errors import ExtractionError, IngestionError, SubjectLocked, UnsupportedMediaType
 from teachme.ingestion.estimate import estimate_ingest
@@ -37,6 +39,7 @@ _OPERATOR_ERRORS = (
     ConfigurationError,
     GenerationError,
     OutlineVersionConflict,
+    FixtureError,
 )
 
 
@@ -351,5 +354,31 @@ def tutorial_show(
         typer.echo("\n## Key points")
         for point in rendered.key_points:
             typer.echo(f"- {point}")
+
+    _run(body)
+
+
+@app.command("eval")
+def run_eval(
+    language: list[str] = typer.Option(None, "--language", "-l", help="Repeatable; default: every fixture"),
+    fixtures: Path = typer.Option(
+        None,
+        "--fixtures",
+        exists=True,
+        file_okay=False,
+        help="Folder of fixture folders; default: the ones shipped with the package",
+    ),
+) -> None:
+    """Score generation and grading against the fixtures with the configured providers.
+
+    Ingests each fixture source into a subject of its own, generates and publishes it, answers
+    its questions as a synthetic student and prints how far the grades and routes matched what
+    the fixture expects. Real providers cost real money: this runs the whole pipeline per fixture.
+    """
+
+    def body(c: Container) -> None:
+        c.check_ready()
+        report = EvalRunner(c).run(languages=language or None, directory=fixtures)
+        typer.echo(report.render())
 
     _run(body)

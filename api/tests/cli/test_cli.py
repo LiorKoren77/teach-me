@@ -253,3 +253,18 @@ def test_tutorial_show_names_the_outline_version_and_can_render_a_draft(cli):
     result = runner.invoke(app, ["tutorial", "show", "--subject", "Geo", "--language", "he", "--draft"])
     assert result.exit_code == 0, result.output
     assert "outline v2 (draft)" in result.output
+
+
+def test_eval_prints_a_report_per_fixture_language(cli):
+    app, *_ = cli
+    result = runner.invoke(app, ["eval", "--language", "en"])
+    assert result.exit_code == 0, result.output
+    assert "[en]" in result.output and "grading agreement" in result.output
+    assert "outline" in result.output and "total: 1 fixture;" in result.output
+    assert "[he]" not in result.output
+
+
+def test_eval_reports_an_unknown_fixture_language_plainly(cli):
+    app, *_ = cli
+    result = runner.invoke(app, ["eval", "--language", "xx"])
+    assert result.exit_code == 1 and result.output.startswith("error: no fixture")

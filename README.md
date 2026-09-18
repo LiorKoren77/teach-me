@@ -28,6 +28,7 @@ teachme generate --subject "History ch. 3"            # outline, glossary, teach
 teachme tutorial status --subject "History ch. 3"
 teachme tutorial show --subject "History ch. 3" --language he --part 0
 teachme publish --subject "History ch. 3"             # locks sources, students can see it
+teachme eval --language en                            # score generation and grading against the fixtures
 ```
 
 `generate --content-only` keeps the current outline and glossary and only regenerates teaching
@@ -141,6 +142,40 @@ refusal or `LLMError` mid-stream rolls the transaction back and emits an `error`
 `done`. Retries stay free because the re-explanation is cached per round: a stream cut off after
 the commit is replayed from the stored row, and one cut off before it re-generates exactly once,
 the attempt row being locked for the duration.
+
+### Evaluation harness
+
+`teachme eval` scores generation and grading against fixtures instead of against a live subject,
+so two model or prompt choices can be compared on identical inputs:
+
+```bash
+teachme eval                       # every shipped fixture: en, he, pt
+teachme eval --language en -l he   # repeatable
+teachme eval --fixtures my-cases   # a folder of fixture folders of your own
+```
+
+Each fixture is a folder under `api/teachme/eval/fixtures/<language>/`:
+
+- `source.md` - a few hundred words on one topic in that language, with two
+  `> **[Figure: ...]**` blocks so figure handling is exercised;
+- `expected.json` (or `expected.yaml`) - the languages to generate, the bounds a sane outline
+  falls within, and a list of answers a synthetic student gives with the grade each deserves.
+  Validated by the pydantic models in `api/teachme/eval/fixtures.py`, so a malformed fixture is
+  named rather than half-run.
+
+A run ingests each source into a freshly named subject of its own, generates and publishes it,
+then answers its generated questions - each expected answer as a separate synthetic student, so
+one answer's grade never changes which questions the next is asked. The report names, per
+fixture, whether the outline fell within bounds, how often the recorded grade matched the
+expected one, how often the route matched (an answer the model check rejected counts as having
+reached the check), how many genuine attempts the relevance gate refused anyway, and what the
+whole fixture cost. Every call goes through the configured providers under the usual usage
+context, so `teachme usage` accounts for an eval run like any other work.
+
+On the fake stack (`LLM_PROVIDER=fake`) the run exercises the plumbing rather than any model's
+judgement: the fake grader credits word overlap with the expected answer, so agreement numbers
+mean nothing until the harness runs against `LLM_PROVIDER=anthropic`. The fixtures' outline
+bounds allow a single part with a single section because a text source is ingested as one page.
 
 ### Stage 3 settings
 

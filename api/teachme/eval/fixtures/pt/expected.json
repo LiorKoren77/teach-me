@@ -1,0 +1,28 @@
+{
+  "language": "pt",
+  "teach_in": ["pt", "en"],
+  "outline": {"min_parts": 1, "max_parts": 3, "min_sections": 1},
+  "answers": [
+    {
+      "question_contains": "clorofila",
+      "answer": "A clorofila é o pigmento dos cloroplastos que absorve a luz azul e vermelha e reflecte a verde, e é a energia dessa luz absorvida que quebra as moléculas de água.",
+      "expected_grade": "correct"
+    },
+    {
+      "question_contains": "estoma",
+      "answer": "Os estomas servem para a planta absorver a luz do Sol pelas raízes.",
+      "expected_grade": "incorrect"
+    },
+    {
+      "question_contains": "",
+      "answer": "Eu gosto de futebol e ontem vi o jogo com o meu irmão.",
+      "expected_grade": "off_topic",
+      "expected_route": "check"
+    },
+    {
+      "question_contains": "",
+      "answer": "",
+      "expected_grade": "junk"
+    }
+  ]
+}
