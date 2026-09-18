@@ -14,9 +14,9 @@ from teachme.domain.models import (
     RelevanceBand,
     Route,
 )
-from teachme.repositories.attempts import ActiveAttemptExists, AttemptRepository
+from teachme.repositories.attempts import ActiveAttemptExists, AttemptNotFound, AttemptRepository
 from teachme.repositories.outlines import OutlineRepository
-from teachme.repositories.progress import ProgressRepository
+from teachme.repositories.progress import ProgressNotFound, ProgressRepository
 from teachme.repositories.questions import QuestionRepository
 from teachme.repositories.subjects import SubjectRepository
 
@@ -175,3 +175,17 @@ def test_best_score_round_trips_a_four_decimal_fraction(db):
     rows = repo.ensure_for_subject("user_1", subject.id, outline.version, [p1.id])
     repo.update(rows[0].id, best_score=0.375)
     assert repo.get("user_1", p1.id).best_score == 0.375
+
+
+def test_missing_rows_are_reported_as_not_found(db):
+    """A student with no row for a part, or an attempt id from nowhere: named errors, not None."""
+    _, _, (p1, _), _ = _fixture(db)
+    with pytest.raises(ProgressNotFound, match=str(p1.id)):
+        ProgressRepository(db).get("user_1", p1.id)
+    repo = AttemptRepository(db)
+    missing = uuid4()
+    with pytest.raises(AttemptNotFound, match=str(missing)):
+        repo.get(missing)
+    with pytest.raises(AttemptNotFound, match=str(missing)):
+        repo.get_question(missing)
+    assert repo.active("user_1", p1.id) is None  # no active attempt is an absence, not an error

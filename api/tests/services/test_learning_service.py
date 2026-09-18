@@ -19,7 +19,8 @@ from teachme.domain.relevance.scorer import RelevanceThresholds
 from teachme.generation.errors import SubjectNotReady
 from teachme.grading.grader import GradeOut
 from teachme.grading.relevance_check import RelevanceVerdict
-from teachme.repositories.attempts import AttemptRepository
+from teachme.ports.llm import LLMError
+from teachme.repositories.attempts import AttemptNotFound, AttemptRepository
 from teachme.services.learning import BankExhausted, LearningError, NotAllowed
 from teachme.settings import Settings
 from tests.helpers import make_pdf
@@ -488,3 +489,89 @@ def test_relevance_thresholds_are_configurable_per_language(env):
     stored = c.attempts.get_question(question.attempt_question_id)
     assert stored.relevance_band == RelevanceBand.HIGH and stored.route == Route.GRADER
     assert not [r for r in fake.calls if r.purpose == "learn.relevance_check"]
+
+
+def _explode(_req):
+    raise LLMError("the provider is down")
+
+
+def test_a_grader_failure_leaves_the_question_open_and_a_retry_grades_it(env):
+    """A model call that fails mid-answer costs the student nothing: the question stays open,
+    the round is not scored, and answering again works."""
+    c, subject, fake = env
+    fake.set_responder(GradeOut, _explode)
+    session = c.learning_service.start_part(USER, subject, position=0, language="en")
+    question = c.learning_service.begin_round(USER, session.attempt_id)
+    part_id = c.attempts.get(session.attempt_id).part_id
+    rounds_before = c.progress.get(USER, part_id).rounds_used
+
+    with pytest.raises(LLMError):
+        c.learning_service.submit_answer(
+            USER,
+            session.attempt_id,
+            question.attempt_question_id,
+            answer_text="The ozone layer absorbs radiation, protecting the biosphere.",
+        )
+    stored = c.attempts.get_question(question.attempt_question_id)
+    assert stored.grade is None and stored.answer_text is None and stored.rejections == 0
+    assert c.attempts.next_unanswered(session.attempt_id).id == question.attempt_question_id
+    assert c.progress.get(USER, part_id).rounds_used == rounds_before
+
+    fake.set_responder(GradeOut, _grade("correct"))
+    retry = c.learning_service.submit_answer(
+        USER,
+        session.attempt_id,
+        question.attempt_question_id,
+        answer_text="The ozone layer absorbs radiation, protecting the biosphere.",
+    )
+    assert retry.accepted and retry.grade == Grade.CORRECT
+
+
+def test_a_stream_failure_leaves_no_reexplanation_and_the_part_reinforcing(env):
+    c, subject, fake = env
+    fake.set_responder(GradeOut, _grade("incorrect"))
+    session = c.learning_service.start_part(USER, subject, position=0, language="en")
+    first = c.learning_service.begin_round(USER, session.attempt_id)
+    _answer_all(c, session.attempt_id, first)
+    part_id = c.attempts.get(session.attempt_id).part_id
+
+    fake.set_text_responder(_explode)
+    with pytest.raises(LLMError):
+        c.learning_service.reexplain(USER, session.attempt_id, on_delta=lambda _delta: None)
+    assert c.attempts.latest_reexplanation(session.attempt_id) is None
+    assert c.progress.get(USER, part_id).status == PartStatus.REINFORCING
+
+    fake.set_text_responder(lambda req: "## Again\n\nthe same sections, explained again")
+    seen = []
+    stored = c.learning_service.reexplain(USER, session.attempt_id, on_delta=seen.append)
+    assert stored is not None and "".join(seen) == stored.body
+
+
+def test_reexplaining_outside_reinforcing_is_refused(env):
+    c, subject, _ = env
+    session = c.learning_service.start_part(USER, subject, position=0, language="en")
+    with pytest.raises(LearningError, match="failed round"):
+        c.learning_service.reexplain(USER, session.attempt_id, on_delta=lambda _delta: None)
+
+
+def test_unknown_and_foreign_attempts_are_refused(env):
+    c, subject, _ = env
+    with pytest.raises(AttemptNotFound):
+        c.learning_service.begin_round(USER, uuid4())
+    session = c.learning_service.start_part(USER, subject, position=0, language="en")
+    with pytest.raises(NotAllowed, match="not your attempt"):
+        c.learning_service.begin_round("someone_else", session.attempt_id)
+    with pytest.raises(NotAllowed, match="not your attempt"):
+        c.learning_service.reexplain("someone_else", session.attempt_id, on_delta=lambda _delta: None)
+    with pytest.raises(AttemptNotFound):
+        c.learning_service.submit_answer(USER, session.attempt_id, uuid4(), answer_text="an answer")
+
+
+def test_render_text_resolves_glossary_placeholders(env):
+    c, subject, _ = env
+    outline = c.outlines.get_version(subject.id, subject.current_outline_version)
+    slug = c.glossary.terms(outline.id)[0].slug
+    rendered = c.learning_service.render_text(subject, "en", f"Look at the {{{{term:{slug}|ozone layer}}}}.")
+    assert "{{term:" not in rendered and "ozone layer" in rendered
+    unknown = c.learning_service.render_text(subject, "en", "A {{term:no-such-term|plain phrase}} here.")
+    assert unknown == "A plain phrase here."
