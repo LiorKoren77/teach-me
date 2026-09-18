@@ -144,13 +144,87 @@ Commit: `feat: upload limits and admin action audit`
 
 ### Task 9: Deploy and verify
 
-- Preview deployment with `JOB_RUNNER=vercel_function`, a generated `JOB_RUNNER_SECRET`, `SELF_BASE_URL` unset.
-- Upload a 20-page PDF from the admin pane; watch the source move through statuses; generate; publish; run one part as a student.
-- Confirm in `teachme usage` that costs are attributed and in the Vercel logs that no function call exceeded its duration.
-- Switch production to federation (Task 6 operations), redeploy, repeat one upload, delete the API key.
+**Status: pending operator action.** Every step below needs a real Vercel project and real
+credentials (Anthropic, Voyage, Clerk, the Vercel team's OIDC issuer) that belong to whoever
+operates this deployment, not to this repo or its automation - so this plan leaves it as a
+checklist rather than a commit. It is reproduced as an operator checklist in the README's
+"Admin upload and background jobs" section.
+
+- [ ] Preview deployment with `JOB_RUNNER=vercel_function`, a generated `JOB_RUNNER_SECRET`, `SELF_BASE_URL` unset.
+- [ ] Upload a 20-page PDF from the admin pane; watch the source move through statuses; generate; publish; run one part as a student.
+- [ ] Confirm in `teachme usage` that costs are attributed and in the Vercel logs that no function call exceeded its duration.
+- [ ] Switch production to federation (Task 6 operations), redeploy, repeat one upload, delete the API key.
 
 ---
 
 ## Decision aid
 
 Choose stage 5 when at least one of these is true: material changes more often than monthly; someone other than the developer must add material; more than three subjects are live. Otherwise the CLI path costs nothing and this plan stays on the shelf.
+
+---
+
+## Deviations recorded during execution
+
+- `TutorialService.plan_generation` returns `GenerationUnit`s and `run_unit` returns a `UnitResult`
+  (`outline`/`part` fields), not the bare list this plan sketched; `plan_part_units(subject,
+  languages=, parts=, outline_version=)` takes the outline version explicitly, so a redelivered
+  `generate_subject` job can fan its parts out against the version an earlier delivery already
+  decided on instead of re-resolving the outline.
+- Redelivery safety for `generate_subject` needed a place to remember what the first delivery
+  decided: migration `0006_job_result.sql` adds `jobs.result` (jsonb), and `run_generate_subject`
+  writes `{"outline_version": ...}` to it the moment the outline unit answers, before any part is
+  enqueued, so a second delivery of the same at-least-once message skips the outline unit and fans
+  out against the recorded version. `JobRepository.set_result`/`has_done` are the two operations
+  this needed that the plan did not name.
+- `JobRepository.claim` is one `UPDATE ... WHERE status IN ('queued', 'failed') RETURNING ...`
+  rather than a read-then-write: it is what makes two concurrent deliveries of the same job
+  resolve to exactly one winner, and `run_job` (`teachme.services.job_execution`) answers a
+  redelivery of an already-`running`/`done` job with `status: "skipped"` instead of running it
+  again - the plan's Task 3 sketch did not call out the race.
+- Extraction resumes per read batch, not per page: `IngestionPipeline.run_next_step` performs one
+  `PAGES_PER_READ_BATCH`-page vision call (or one chunking step, or one indexing step) and returns
+  whether more remains; `dispatch` (`services/job_execution.py`) re-enqueues `ingest_source` with
+  the same payload when it does, so a step that never comes back costs at most one batch, not one
+  page and not the whole source.
+- Refusing an oversized upload needed a middleware, not just a route-level check:
+  `RefuseOversizedUploads` (`api/teachme/app.py`) answers `413` to a declared `Content-Length`
+  over `MAX_UPLOAD_BYTES` before FastAPI parses the multipart body at all, because parsing runs
+  before the endpoint's first line and would otherwise pay for (or 400 on) the very upload being
+  refused. A chunked body (no declared length) is still measured in the route once the body is in
+  hand, refused with the same `413` - the honest limit of what can be checked before the bytes
+  arrive.
+- The job runner protocol grew a third method beyond the plan's `enqueue`: `enqueue_inline`
+  (finishes the hand-over before returning, for a caller - the `/api/jobs/run` re-enqueue itself -
+  that may not still exist a moment later) and `deliver` (hand an existing row to the executor,
+  what a redelivery and the sweeps use). `sweep_stale_jobs` covers both stuck cases named in the
+  plan's Task 3 sketch: `fail_stale_running` (an invocation that hit its duration limit) and
+  `requeue_stale_queued` (a hand-over accepted but never delivered) - `teachme jobs sweep` and
+  `teachme jobs kick` are the CLI's manual triggers for each.
+- `VercelFunctionJobRunner.mark_failed` (wired from `Scope.mark_job_failed`) records a POST that
+  never landed on a connection of its own (autocommit, opened fresh), not through the request's
+  pooled connection the plan implied - by the time the daemon thread's POST fails, that connection
+  may already be serving another request, or the pool may have none to give.
+- `Settings.vercel_url` is a first-class setting (read here, never from raw `os.environ`, per the
+  file's own rule), not just an implicit fallback as the plan's Task 3 note suggested;
+  `job_callback_base_url` is the property that resolves `SELF_BASE_URL` or `https://{VERCEL_URL}`.
+- The plan's Task 7 sketch passed `SqsWorker` handlers and a jobs repository directly; the shipped
+  `SqsWorker(queue_url, region, run_job=...)` instead takes the same `run_job` function
+  (`teachme.services.job_execution.run_job`) the `/api/jobs/run` route calls, so claiming,
+  dispatching and recording a job is one function shared by both delivery paths rather than two
+  parallel implementations.
+- The audit trail (`admin_actions`, migration `0007_admin_actions.sql`, not `0005` as the plan's
+  Task 8 sketch numbered it) has no foreign keys and stamps `clock_timestamp()` rather than
+  `now()`, for the same reason `llm_usage` has neither: a delete must not cascade away the record
+  of itself, and two actions recorded in one transaction must not tie for order. `MAX_UPLOADS_PER_HOUR`
+  is counted from this table (`AdminActionRepository.count_since`), since `jobs` rows carry no actor.
+- `AdminCapabilities` carries `max_upload_bytes` alongside `accepted_media_types` (not just the
+  media types the plan's Task 4 sketch named), so `UploadPane` can refuse an oversized file
+  client-side using the same number the backend enforces; `useAdminActions` also bounds how long
+  it polls a job (`MAX_JOB_POLL_TICKS`, about two minutes) rather than polling forever, which the
+  plan's Task 5 sketch did not mention.
+- The function duration ceiling is configured in `vercel.json` (`functions["api/index.py"].maxDuration`),
+  not `vercel.ts` as the plan's file structure and Task 3 named it - this project has no `vercel.ts`.
+- Task 9 (deploy and verify) was left as an operator checklist rather than executed here: it needs
+  a real Vercel project and real Anthropic/Voyage/Clerk credentials that belong to whoever runs
+  the deployment, not to this repo's automation. See the README's "Admin upload and background
+  jobs" section.

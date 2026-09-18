@@ -216,9 +216,15 @@ itself names pages by their printed number, which is not a corpus index.
 
 ### Admin upload
 
-The admin pane does over HTTP exactly what the CLI does: `POST .../sources` calls the same
-`SourceService.register` and queues the same `ingest_source` job as `teachme ingest`, so no part
-of ingestion knows which of the two put the file there. An upload that declares a `Content-Length`
+Every route under `/api/admin` requires the `admin` role claim (see "Authentication"); the pane
+itself is offered only to a reader whose session token carries it, and hides behind the same check
+regardless (see "Frontend"). The admin pane does over HTTP exactly what the CLI does: `POST
+.../sources` calls the same `SourceService.register` and queues the same `ingest_source` job as
+`teachme ingest`, so no part of ingestion knows which of the two put the file there. The file
+picker's accepted types and its size cap both come from `GET /api/admin/capabilities`
+(`accepted_media_types`, `max_upload_bytes`) rather than a list written in the frontend, so the
+pane never offers what the backend would refuse and disables its own upload button for a file
+already known to be too large. An upload that declares a `Content-Length`
 over `MAX_UPLOAD_BYTES` is refused with `413` by a middleware in front of the router, before the
 body is read at all - it has to be there, because FastAPI parses the whole multipart form before
 the endpoint's first line runs. A chunked body declares no length, so those are measured after
@@ -226,11 +232,15 @@ the form is parsed and refused with the same `413`; the bytes have been received
 is as early as anything can tell. An upload is refused by the service when
 the type is one the configured LLM adapter cannot read (`415`) or the subject is published
 (`409`) - a published subject is locked against upload, delete, reingest and generate, though its
-sources stay visible. The response carries the registered source and the `job_id` to poll at
+sources stay visible - or with `429` once this admin has made `MAX_UPLOADS_PER_HOUR` uploads in
+the last hour, counted from the `admin_actions` audit trail (see "Admin audit trail"), checked
+before the body is read. The response carries the registered source and the `job_id` to poll at
 `GET /api/admin/jobs/{job_id}`; the pane follows the source's own status rather than that job,
 because ingestion is resumable and behind the `vercel_function` runner takes several jobs to
-finish. Generate, publish and unpublish are the same `TutorialService` calls `teachme tutorial`
-makes, and `.../status` prints the same numbers `teachme tutorial status` does.
+finish - and gives up following a job (not the source) after `MAX_JOB_POLL_TICKS` polls (about two
+minutes) so a crashed worker cannot poll forever with the screen open. Generate, publish and
+unpublish are the same `TutorialService` calls `teachme tutorial` makes, and `.../status` prints
+the same numbers `teachme tutorial status` does.
 
 ### Admin audit trail
 
@@ -417,12 +427,32 @@ New settings from `api/teachme/settings.py` (env names as in `.env.example`):
 - `RELEVANCE_THRESHOLDS` (`relevance_thresholds`) - per-language JSON overrides of the two thresholds above (the lexical score is not equally generous in every language).
 - `CLERK_JWKS_URL` (`clerk_jwks_url`) - Clerk's JWKS endpoint; unset means no auth guard is built and every authenticated route answers `503`.
 
+### Stage 5 settings
+
+New settings from `api/teachme/settings.py` (env names as in `.env.example`):
+
+- `JOB_RUNNER` (`job_runner`: `inprocess`\|`sqs`\|`vercel_function`, default `inprocess`) - which job runner adapter `Scope.job_runner` builds; see "Background jobs".
+- `JOB_RUNNER_SECRET` (`job_runner_secret`) - shared secret `POST /api/jobs/run` compares against the `x-job-secret` header in constant time; required when `JOB_RUNNER=vercel_function`.
+- `SELF_BASE_URL` (`self_base_url`) - base url the `vercel_function` runner posts its self-invocation to; unset means `https://{VERCEL_URL}`.
+- `VERCEL_URL` (`vercel_url`) - set by Vercel on every deployment; read here (settings is the only place that touches the environment) and used when `SELF_BASE_URL` is unset.
+- `JOB_STALE_AFTER_SECONDS` (`job_stale_after_seconds`, default 300) - how long a `running` job may go untouched before `/api/jobs/run` and `teachme jobs sweep` mark it `failed` (and so claimable again); keep it at `vercel.json`'s `maxDuration`.
+- `MAX_UPLOAD_BYTES` (`max_upload_bytes`, default 52428800 / 50 MB) - largest admin upload accepted; a declared `Content-Length` over it is refused with `413` before the body is read, a chunked body once it is.
+- `MAX_UPLOADS_PER_HOUR` (`max_uploads_per_hour`, default 20) - how many sources one admin may upload per hour, counted from the `admin_actions` trail; the next one is a `429`.
+- `IDENTITY_PROVIDER` (`identity_provider`: `none`\|`vercel_oidc`\|`file`, default `none`) - where the OIDC token for Anthropic workload identity federation comes from; `none` means authenticate with `ANTHROPIC_API_KEY`. See "Workload identity federation".
+- `IDENTITY_TOKEN_FILE` (`identity_token_file`) - the file `IDENTITY_PROVIDER=file` re-reads on every token exchange (a projected service-account token, or what a CLI/worker run against federation uses).
+- `ANTHROPIC_FEDERATION_RULE_ID` (`anthropic_federation_rule_id`) - the federation rule the OIDC token is exchanged against (Anthropic console).
+- `ANTHROPIC_ORGANIZATION_ID` (`anthropic_organization_id`) - the organization owning that rule; a raw UUID, not a tagged id.
+- `ANTHROPIC_SERVICE_ACCOUNT_ID` (`anthropic_service_account_id`) - the service account the minted token acts as.
+- `ANTHROPIC_WORKSPACE_ID` (`anthropic_workspace_id`) - the workspace the minted token is scoped to (`wrkspc_*`, or `default`).
+
 ## Deployment
 
-Deploying stages 1-4 to Vercel is operational work, not part of this repo's automated setup;
-the full checklist (and the running record of the pilot's per-student cost) lives in Task 11 of
-`docs/superpowers/plans/2026-09-18-stage4-frontend.md`. The notes below are what actually changes
-versus the local run described above.
+Deploying to Vercel is operational work, not part of this repo's automated setup; the full
+checklist for stages 1-4 (and the running record of the pilot's per-student cost) lives in Task 11
+of `docs/superpowers/plans/2026-09-18-stage4-frontend.md`, and the stage 5 checklist (admin upload,
+background jobs, federation) is Task 9 of `docs/superpowers/plans/2026-09-18-stage5-admin-upload.md`,
+reproduced under "Admin upload and background jobs" below. The notes below are what actually
+changes versus the local run described above.
 
 - **Project**: rename the Vercel project to `teach-me` in the dashboard (the CLI cannot rename an
   existing project), then `vercel link` to it.
@@ -454,8 +484,25 @@ versus the local run described above.
   the first deploy, then `vercel` (preview) and `vercel --prod`; ingest, generate and publish one
   real short PDF from the CLI and sign in to run one part end to end before trusting it with
   students. Run `teachme usage` afterwards to see what that run cost.
-- The admin upload pane (stage 5) is deliberately out of scope for this deployment - see Task 11
-  and "Self-review against the spec" in the plan.
+
+### Admin upload and background jobs
+
+Task 9 of the stage 5 plan, as an operator checklist - it needs real credentials and a real
+Vercel project, so it stays a checklist here rather than something this repo runs for you:
+
+- [ ] Preview deployment with `JOB_RUNNER=vercel_function`, a generated `JOB_RUNNER_SECRET`
+  (`openssl rand -hex 32`), and `SELF_BASE_URL` left unset so the runner calls back its own
+  preview host via `VERCEL_URL` (see "Background jobs"). Confirm the account plan covers
+  `vercel.json`'s `maxDuration: 300` - 300 s needs Pro or above; on Hobby, lower it (and
+  `JOB_STALE_AFTER_SECONDS`, and probably `PAGES_PER_READ_BATCH`) to what the plan allows.
+- [ ] Upload a 20-page PDF from the admin pane (`/admin`, an account with the `admin` role
+  claim) and watch it move through the statuses the pane polls (see "Admin upload").
+- [ ] Generate, then publish, then sign in as a student and run one part end to end.
+- [ ] Confirm `teachme usage` attributes the run's cost, and check the Vercel function logs that
+  no `/api/jobs/run` invocation exceeded its `maxDuration`.
+- [ ] Switch production to Workload Identity Federation - the console and environment-variable
+  steps are already written under "Workload identity federation" below; do not repeat them here.
+  Redeploy, repeat one upload from the admin pane, then delete the API key.
 
 ### Workload identity federation
 
