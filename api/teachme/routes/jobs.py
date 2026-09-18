@@ -27,7 +27,9 @@ class RunJobRequest(BaseModel):
 
 class RunJobResult(BaseModel):
     """One unit of work, done. `next_job_id` names the job that carries on where this one stopped
-    - the rest of an ingestion - and is null when there is nothing left to do."""
+    - the rest of an ingestion - and is null when there is nothing left to do. `status` is
+    "skipped" for a delivery that found the job already claimed, which is not a failure and not
+    something to retry: the claim that won it is doing the work."""
 
     job_id: UUID
     kind: str
@@ -40,7 +42,9 @@ def _authorize(scope: Scope, given: str | None) -> None:
     configured cannot be called at all, rather than being open to everyone."""
     configured = scope.shared.settings.job_runner_secret
     expected = configured.get_secret_value() if configured is not None else ""
-    if not expected or not given or not hmac.compare_digest(given, expected):
+    # Compared as bytes: `compare_digest` refuses two `str`s unless both are ASCII, and a header
+    # is whatever the caller sent, so comparing strings would turn a wrong secret into a 500.
+    if not expected or not given or not hmac.compare_digest(given.encode(), expected.encode()):
         raise HTTPException(status_code=401, detail="invalid job secret")
 
 
@@ -67,18 +71,21 @@ def run_job(
 ) -> RunJobResult:
     _authorize(scope, x_job_secret)
     job = scope.jobs.get(body.job_id)  # a job id nobody queued is a 404, not a 500
-    scope.jobs.set_status(job["id"], "running")
-    scope.jobs.increment_attempts(job["id"])
+    claimed = scope.jobs.claim(body.job_id)
     scope.conn.commit()
+    if claimed is None:
+        # A redelivery of a job that is already running or finished. 200 with no `next_job_id`:
+        # the invoker is told there is nothing to do here rather than asked to try again.
+        return RunJobResult(job_id=job["id"], kind=job["kind"], status="skipped")
     try:
-        next_job_id = _dispatch(scope, job["id"], job["kind"], job["payload"])
+        next_job_id = _dispatch(scope, claimed.id, claimed.kind, claimed.payload)
     except Exception as exc:
         # The step that failed has already rolled its own work back; this puts the connection in a
         # state where the job row can be written, and commits it before the error propagates.
         scope.conn.rollback()
-        scope.jobs.set_status(job["id"], "failed", error=str(exc))
+        scope.jobs.set_status(claimed.id, "failed", error=str(exc))
         scope.conn.commit()
         raise
-    scope.jobs.set_status(job["id"], "done")
+    scope.jobs.set_status(claimed.id, "done")
     scope.conn.commit()
-    return RunJobResult(job_id=job["id"], kind=job["kind"], status="done", next_job_id=next_job_id)
+    return RunJobResult(job_id=claimed.id, kind=claimed.kind, status="done", next_job_id=next_job_id)

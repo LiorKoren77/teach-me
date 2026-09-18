@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -7,6 +8,18 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from teachme.repositories.errors import JobNotFound
+
+
+@dataclass(frozen=True)
+class ClaimedJob:
+    """A job this caller, and no other, is now running. What `claim` hands back: everything the
+    dispatcher needs, read out of the same statement that took the row, so nothing it acts on can
+    have been written by a delivery that claimed it in between."""
+
+    id: UUID
+    kind: str
+    payload: dict[str, Any]
+    attempts: int
 
 
 class JobRepository:
@@ -46,6 +59,21 @@ class JobRepository:
             (kind, Jsonb(payload)),
         ).fetchone()
         return row is not None
+
+    def claim(self, job_id: UUID) -> ClaimedJob | None:
+        """Take this job for running, or find it already taken. One statement: the row is locked,
+        tested and moved to `running` together, so of two deliveries arriving at once exactly one
+        is handed the job and a redelivery of a `done` job is handed nothing.
+
+        `failed` is claimable because a retry is how a failed step is resumed; `running` and
+        `done` are not, which is what makes the second delivery a no-op instead of a second run."""
+        row = self._conn.execute(
+            "UPDATE jobs SET status = 'running', attempts = attempts + 1, updated_at = now()"
+            " WHERE id = %s AND status IN ('queued', 'failed')"
+            " RETURNING id, kind, payload, attempts",
+            (job_id,),
+        ).fetchone()
+        return None if row is None else ClaimedJob(**row)
 
     def set_status(self, job_id: UUID, status: str, *, error: str | None = None) -> None:
         self._conn.execute(

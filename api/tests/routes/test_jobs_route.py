@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 
 import httpx
@@ -86,6 +87,64 @@ def test_a_deployment_without_a_secret_refuses_everyone(db, make_container):
     container.conn.commit()
     with TestClient(create_app(container)) as http:
         assert run(http, job_id, secret="anything").status_code == 401
+
+
+def test_a_non_ascii_secret_is_refused_rather_than_crashing(ingest_job):
+    """A header nobody could have configured still has to be compared, not raise: `compare_digest`
+    refuses two `str`s unless both are ASCII, so the comparison is made on bytes."""
+    http, container, source, job_id, _ = ingest_job
+    # As a byte string, because that is what reaches a server: Starlette decodes a header as
+    # latin-1, so these bytes arrive as a `str` with a character outside ASCII in it.
+    assert run(http, job_id, secret="s\u00e9cret".encode("latin-1")).status_code == 401
+    with container.pool.connection() as conn:
+        row = conn.execute("SELECT status FROM jobs WHERE id = %s", (job_id,)).fetchone()
+    assert row["status"] == "queued"
+
+
+def _counts(container) -> tuple[int, int]:
+    with container.pool.connection() as conn:
+        jobs = conn.execute("SELECT count(*) AS n FROM jobs").fetchone()["n"]
+        usage = conn.execute("SELECT count(*) AS n FROM llm_usage").fetchone()["n"]
+    return jobs, usage
+
+
+def test_a_redelivered_job_is_skipped_rather_than_run_again(ingest_job):
+    """At-least-once delivery means the same message arrives twice. The second one must not redo
+    the step the first one finished - and must not ask for a retry, so no `next_job_id`."""
+    http, container, source, job_id, _ = ingest_job
+    assert run(http, job_id).json()["status"] == "done"
+    before = _counts(container)
+
+    response = run(http, job_id)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "skipped" and body["job_id"] == str(job_id)
+    assert body["next_job_id"] is None
+    assert _counts(container) == before  # no second step, no second job
+
+
+def test_two_concurrent_deliveries_run_the_job_once(ingest_job):
+    """Two invocations receiving the same message at the same moment: the claim is one statement,
+    so the second finds the row already `running` and stands down."""
+    http, container, source, job_id, _ = ingest_job
+    results: list[str] = []
+    lock = threading.Lock()
+
+    def deliver() -> None:
+        status = run(http, job_id).json()["status"]
+        with lock:
+            results.append(status)
+
+    threads = [threading.Thread(target=deliver) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(30)
+
+    assert sorted(results) == ["done", "skipped"]
+    with container.pool.connection() as conn:
+        row = conn.execute("SELECT status, attempts FROM jobs WHERE id = %s", (job_id,)).fetchone()
+    assert row["status"] == "done" and row["attempts"] == 1
 
 
 def test_an_unknown_job_id_is_404_not_500(ingest_job):
