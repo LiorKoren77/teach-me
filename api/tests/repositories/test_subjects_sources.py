@@ -58,3 +58,13 @@ def test_set_status_ignores_error_and_resume_status_when_not_failed(db):
     loaded = repo.get(source.id)
     assert loaded.error is None
     assert loaded.resume_status is None
+
+
+def test_subject_settings_and_published_version(db):
+    repo = SubjectRepository(db)
+    subject = repo.create("Bio", ["he"])
+    assert subject.pass_threshold == 50 and subject.max_rounds == 3 and subject.questions_per_round == 5
+    assert subject.bank_size_per_part == 25 and subject.gloss_frequency == "first"
+    assert subject.current_outline_version is None
+    repo.set_current_outline_version(subject.id, 3)
+    assert repo.get(subject.id).current_outline_version == 3

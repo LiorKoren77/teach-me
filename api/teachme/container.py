@@ -22,9 +22,13 @@ from teachme.ports.file_store import FileStore
 from teachme.ports.job_runner import JobPayload, JobRunner
 from teachme.ports.llm import LLMProvider
 from teachme.ports.reranker import Reranker
+from teachme.repositories.content import ContentRepository
 from teachme.repositories.figures import FigureRepository
+from teachme.repositories.glossary import GlossaryRepository
 from teachme.repositories.jobs import JobRepository
+from teachme.repositories.outlines import OutlineRepository
 from teachme.repositories.pages import PageRepository
+from teachme.repositories.questions import QuestionRepository
 from teachme.repositories.sources import SourceRepository
 from teachme.repositories.subjects import SubjectRepository
 from teachme.repositories.usage import UsageRepository
@@ -32,6 +36,7 @@ from teachme.retrieval.hybrid import HybridSearch
 from teachme.services.export_import import ExportImportService
 from teachme.services.sources import SourceService
 from teachme.services.subjects import SubjectService
+from teachme.services.tutorial import TutorialService
 from teachme.services.usage import UsageService
 from teachme.settings import Settings
 from teachme.telemetry.prices import PriceTable
@@ -160,6 +165,22 @@ class Container:
         return JobRepository(self.conn)
 
     @cached_property
+    def outlines(self) -> OutlineRepository:
+        return OutlineRepository(self.conn)
+
+    @cached_property
+    def glossary(self) -> GlossaryRepository:
+        return GlossaryRepository(self.conn)
+
+    @cached_property
+    def content(self) -> ContentRepository:
+        return ContentRepository(self.conn)
+
+    @cached_property
+    def questions(self) -> QuestionRepository:
+        return QuestionRepository(self.conn)
+
+    @cached_property
     def usage_repo(self) -> UsageRepository:
         return UsageRepository(self.usage_conn)
 
@@ -215,6 +236,22 @@ class Container:
     def source_service(self) -> SourceService:
         return SourceService(
             self.conn, self.settings, self.llm, self.files, self.search, self.sources, self.subjects
+        )
+
+    @cached_property
+    def tutorial_service(self) -> TutorialService:
+        return TutorialService(
+            self.conn,
+            self.settings,
+            self.llm,
+            self.subjects,
+            self.sources,
+            self.pages,
+            self.outlines,
+            self.glossary,
+            self.content,
+            self.questions,
+            self.bundle_stores,
         )
 
     @cached_property

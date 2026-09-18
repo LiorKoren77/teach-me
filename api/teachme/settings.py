@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     model_read_pages: str = "claude-opus-5"
     model_detect_language: str = "claude-opus-5"
     model_contextualize: str = "claude-opus-5"
+    model_generation: str = "claude-opus-5"
     embedding_model: str = "voyage-4"
     rerank_model: str = "rerank-2.5"
 

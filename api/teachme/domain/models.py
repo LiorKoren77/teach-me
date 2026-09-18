@@ -32,6 +32,12 @@ class Subject(Frozen):
     state: SubjectState
     languages: tuple[str, ...]
     created_by: str | None = None
+    pass_threshold: int = 50
+    max_rounds: int = 3
+    questions_per_round: int = 5
+    bank_size_per_part: int = 25
+    gloss_frequency: str = "first"
+    current_outline_version: int | None = None
 
 
 class Source(BaseModel):

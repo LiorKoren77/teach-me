@@ -8,7 +8,10 @@ import psycopg
 from teachme.domain.models import Subject, SubjectState
 from teachme.repositories.errors import SubjectNotFound
 
-_COLUMNS = "id, name, state, languages, created_by"
+_COLUMNS = (
+    "id, name, state, languages, created_by, pass_threshold, max_rounds, questions_per_round,"
+    " bank_size_per_part, gloss_frequency, current_outline_version"
+)
 
 
 def _row_to_subject(row: dict) -> Subject:
@@ -18,6 +21,12 @@ def _row_to_subject(row: dict) -> Subject:
         state=SubjectState(row["state"]),
         languages=tuple(row["languages"]),
         created_by=row["created_by"],
+        pass_threshold=row["pass_threshold"],
+        max_rounds=row["max_rounds"],
+        questions_per_round=row["questions_per_round"],
+        bank_size_per_part=row["bank_size_per_part"],
+        gloss_frequency=row["gloss_frequency"],
+        current_outline_version=row["current_outline_version"],
     )
 
 
@@ -49,3 +58,8 @@ class SubjectRepository:
 
     def set_state(self, subject_id: UUID, state: SubjectState) -> None:
         self._conn.execute("UPDATE subjects SET state = %s WHERE id = %s", (state.value, subject_id))
+
+    def set_current_outline_version(self, subject_id: UUID, version: int) -> None:
+        self._conn.execute(
+            "UPDATE subjects SET current_outline_version = %s WHERE id = %s", (version, subject_id)
+        )
