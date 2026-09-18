@@ -30,6 +30,14 @@ log = logging.getLogger(__name__)
 # The job kind a queued ingestion travels under.
 INGEST_SOURCE = "ingest_source"
 
+# What a finished step hands the source on to. Each step sets its own status when it starts, and
+# nothing else; the transition out of it belongs to whoever drives the sequence, so no step has to
+# know - or claim - the name of the one that follows it.
+NEXT_STEP = {
+    SourceStatus.EXTRACTING: SourceStatus.CHUNKING,
+    SourceStatus.CHUNKING: SourceStatus.INDEXING,
+}
+
 
 @dataclass
 class PipelineDeps:
@@ -99,7 +107,11 @@ class IngestionPipeline:
                 )
                 self.d.conn.commit()
                 raise
-        return step != SourceStatus.INDEXING
+        if step == SourceStatus.INDEXING:
+            return False  # _index recorded READY itself; there is no next step to hand over to
+        self.d.sources.set_status(source.id, NEXT_STEP[step])
+        self.d.conn.commit()
+        return True
 
     @staticmethod
     def _resume_point(source: Source) -> SourceStatus:
@@ -133,7 +145,6 @@ class IngestionPipeline:
         )
         bundle.write_pages(source_slug, extraction.pages)
         bundle.write_figures(source_slug, extraction.figures)
-        self.d.sources.set_status(source.id, SourceStatus.CHUNKING)
         self.d.conn.commit()
 
     def _chunk(self, source: Source, subject: Subject, bundle: BundleWriter, source_slug: str) -> list[Chunk]:
@@ -151,7 +162,6 @@ class IngestionPipeline:
             self.d.settings.pages_per_chunk_batch,
         )
         bundle.write_chunks(source_slug, chunks)
-        self.d.sources.set_status(source.id, SourceStatus.INDEXING)
         self.d.conn.commit()
         return chunks
 

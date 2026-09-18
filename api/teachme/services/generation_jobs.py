@@ -86,17 +86,26 @@ def run_generate_subject(
         version = outline.version
         jobs.set_result(job_id, {"outline_version": version})
         commit()
+    enqueued = 0
+    failure: Exception | None = None
     for unit in service.plan_part_units(subject, languages=languages, parts=parts, outline_version=version):
         unit_payload = GenerateUnitJob(unit=unit).model_dump(mode="json")
         if jobs.has_done(GENERATE_UNIT, unit_payload):
             continue  # a redelivery: this exact part, against this version, is already generated
         try:
             runner.enqueue(GENERATE_UNIT, unit_payload)
-        except Exception:
+        except Exception as exc:
             # An in-process runner runs the unit here and re-raises what it failed with; a queued
             # one can fail to accept the message. Either way that unit's own job row carries the
             # error, and its siblings are independent - one bad part must not cancel the subject.
             log.exception("generate_unit for part %s [%s] failed", unit.part_position, unit.language)
+            failure = exc
+        else:
+            enqueued += 1
+    if failure is not None and enqueued == 0:
+        # Nothing was handed over at all - a queue that is down, not one bad part. No sibling job
+        # is left to carry the error, so this job has to be the one that says the run failed.
+        raise failure
 
 
 def run_generate_unit(payload: JobPayload, *, service: TutorialService) -> None:

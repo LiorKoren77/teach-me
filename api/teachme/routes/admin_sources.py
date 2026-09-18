@@ -89,6 +89,9 @@ def job(job_id: UUID, user: AdminUser, scope: ScopeDep) -> AdminJob:
 @router.post("/subjects/{subject_id}/generate", response_model=AdminJobRef)
 def generate(subject_id: UUID, user: AdminUser, scope: ScopeDep) -> AdminJobRef:
     subject = _require_draft(scope.subjects.get(subject_id))
+    # Plan the run here, so everything it would refuse - an unready subject above all - is a status
+    # code the admin sees now, rather than a queued job that fails where nobody is looking.
+    scope.tutorial_service.plan_generation(subject)
     payload = GenerateSubjectJob(subject_id=subject.id).model_dump(mode="json")
     return AdminJobRef(job_id=scope.job_runner.enqueue(GENERATE_SUBJECT, payload))
 

@@ -156,3 +156,13 @@ def test_a_student_is_refused_every_admin_route(make_admin):
     assert [response.status_code for response in calls] == [403] * len(calls)
     user["role"] = "admin"
     assert client.get(f"{subject_path}/sources").json()[0]["status"] == "ready"
+
+
+def test_generate_is_refused_before_a_job_exists_when_nothing_is_ready(make_admin):
+    """The route plans the run while the admin is still on the line, so an unready subject is a
+    409 they can act on rather than a job that fails somewhere behind them."""
+    client, container, subject, _ = make_admin()
+    response = client.post(f"/api/admin/subjects/{subject.id}/generate")
+    assert response.status_code == 409 and "no sources" in response.json()["detail"]
+    with container.pool.connection() as conn:
+        assert conn.execute("SELECT count(*) AS n FROM jobs").fetchone()["n"] == 0

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Sequence
 from enum import StrEnum
 from uuid import UUID, uuid4
@@ -43,6 +44,8 @@ from teachme.repositories.sources import SourceRepository
 from teachme.repositories.subjects import SubjectRepository
 from teachme.settings import Settings
 from teachme.telemetry.usage import usage_context
+
+log = logging.getLogger(__name__)
 
 MIN_QUESTIONS_PER_SECTION = 2
 VersionListener = Callable[[Subject, int], None]
@@ -113,7 +116,10 @@ class GenerationUnit(BaseModel):
     subject_id: UUID
     languages: tuple[str, ...] = ()  # OUTLINE: the languages whose glossary translations it owns
     new_outline: bool = False  # OUTLINE: create a version rather than reuse the current one
-    outline_version: int | None = None  # PART: the version it belongs to
+    # PART: the version it belongs to. OUTLINE: the version to reuse, when new_outline is False -
+    # a plan that already named its parts against a version must run its outline unit against that
+    # same one, or the two halves of the plan would answer to different versions.
+    outline_version: int | None = None
     part_position: int | None = None  # PART
     language: str | None = None  # PART
 
@@ -194,13 +200,19 @@ class TutorialService:
         self._listeners: list[VersionListener] = []
 
     # generation -----------------------------------------------------------------------------
-    def corpus(self, subject: Subject) -> SubjectCorpus:
+    def _require_ready_sources(self, subject: Subject) -> list[Source]:
+        """The subject's sources, or the reason there is nothing to generate from. Cheap enough to
+        ask before planning a run, which is where a refusal still reaches whoever asked for it."""
         sources = self._sources.list_by_subject(subject.id)
         if not sources:
             raise SubjectNotReady(f"subject {subject.name!r} has no sources")
         not_ready = [s.filename for s in sources if s.status != SourceStatus.READY]
         if not_ready:
             raise SubjectNotReady(f"sources not ready: {not_ready}")
+        return sources
+
+    def corpus(self, subject: Subject) -> SubjectCorpus:
+        sources = self._require_ready_sources(subject)
         return build_corpus(sources, {s.id: self._pages.list(s.id) for s in sources})
 
     def generate(
@@ -218,8 +230,12 @@ class TutorialService:
         outline_unit = plan[0]
         outline = self.run_unit(outline_unit).outline
         assert outline is not None  # the outline unit created or reused one, or it raised
-        part_units = self.plan_part_units(
-            subject, languages=languages, parts=parts, outline_version=outline.version
+        # A run that reused the current version was planned in full: those units are the answer.
+        # Only a run that created a version has parts the plan could not name yet.
+        part_units = (
+            self.plan_part_units(subject, languages=languages, parts=parts, outline_version=outline.version)
+            if outline_unit.new_outline
+            else plan[1:]
         )
         results = [result for unit in part_units if (result := self.run_unit(unit).part) is not None]
         return GenerationReport(
@@ -243,10 +259,12 @@ class TutorialService:
         The parts of an outline version that does not exist yet cannot be named, so a run that will
         create one stops after the outline unit; running that unit makes the parts real and
         `plan_part_units` then returns them. Everything a run can refuse - a published subject, a
-        language the subject does not have, a part position the current outline does not have - is
-        refused here, before the first model call."""
+        subject whose sources are not ready, a language the subject does not have, a part position
+        the current outline does not have - is refused here, before the first model call, so that a
+        caller enqueuing this plan hears it instead of a job nobody is watching."""
         if subject.state == SubjectState.PUBLISHED:
             raise SubjectLocked(f"subject {subject.name!r} is published; unpublish before generating")
+        self._require_ready_sources(subject)  # the same check the run makes, made while asked
         chosen_languages = self._chosen_languages(subject, languages)
         outline = self._outlines.latest(subject.id)
         # A content-only run, and any run that names parts, reuses the current version:
@@ -258,10 +276,14 @@ class TutorialService:
             subject_id=subject.id,
             languages=tuple(chosen_languages),
             new_outline=new_outline,
+            outline_version=None if new_outline or outline is None else outline.version,
         )
-        if new_outline:
+        if new_outline or outline is None:
             return [unit]
-        return [unit, *self.plan_part_units(subject, languages=languages, parts=parts)]
+        return [
+            unit,
+            *self.plan_part_units(subject, languages=languages, parts=parts, outline_version=outline.version),
+        ]
 
     def plan_part_units(
         self,
@@ -335,7 +357,13 @@ class TutorialService:
         corpus = self.corpus(subject)
         slug = bundle_slug(subject.name, subject.id)
         model = self._settings.model_generation
-        outline = self._outlines.latest(subject.id)
+        outline = (
+            self._outlines.latest(subject.id)
+            if unit.outline_version is None
+            else self._outlines.get_version(subject.id, unit.outline_version)
+        )
+        if unit.outline_version is not None and outline is None:
+            raise GenerationError(f"subject {subject.name!r} has no outline v{unit.outline_version}")
         if unit.new_outline or outline is None:
             outline = self._create_outline(subject, corpus, model, slug)
         writer = SubjectBundleWriter(self._bundle_stores, slug, outline.version)
@@ -353,6 +381,19 @@ class TutorialService:
         )
         if outline is None:
             raise GenerationError(f"subject {subject.name!r} has no outline v{unit.outline_version}")
+        latest = self._outlines.latest(subject.id)
+        if latest is not None and latest.version != outline.version:
+            # Legitimate for a run that started before someone else created a version, and exactly
+            # what a part unit that lost its pin would look like - so it is never silent.
+            log.warning(
+                "part %s [%s] of %r is being generated against outline v%s, which is no longer "
+                "the latest (v%s)",
+                unit.part_position,
+                unit.language,
+                subject.name,
+                outline.version,
+                latest.version,
+            )
         part = next((p for p in self._outlines.parts(outline.id) if p.position == unit.part_position), None)
         if part is None:
             raise GenerationError(f"no such parts: [{unit.part_position}]")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from uuid import uuid4
 
 import pytest
@@ -22,6 +23,7 @@ from teachme.services.generation_jobs import (
     GENERATE_UNIT,
     GenerateSubjectJob,
     GenerateUnitJob,
+    run_generate_subject,
 )
 from teachme.services.tutorial import GenerationUnit, UnitKind
 from teachme.settings import Settings
@@ -548,3 +550,77 @@ def test_a_redelivered_generate_subject_job_reuses_the_version_it_created(contai
     assert units and all(u.outline_version == 1 for u in units)
     assert len(units) == len({(u.part_position, u.language) for u in units})
     assert container.tutorial_service.status(subject).publishable
+
+
+def test_plan_generation_refuses_a_subject_whose_sources_are_not_ready(container):
+    """The same readiness check the run itself makes, made while a caller is still listening: a
+    planner that says yes only to fail in a job nobody is watching is worse than a refusal."""
+    subject = container.subject_service.get_or_create("Empty", ["he"])
+    with pytest.raises(SubjectNotReady, match="no sources"):
+        container.tutorial_service.plan_generation(subject)
+
+    source = container.source_service.register(subject, "ch1.pdf", make_pdf(4))
+    container.conn.commit()
+    with pytest.raises(SubjectNotReady, match=source.filename):
+        container.tutorial_service.plan_generation(subject)
+
+
+def test_a_part_unit_against_a_superseded_version_says_so(container, caplog):
+    """Generating into a version that is no longer the latest is legitimate - a run that started
+    before someone else's - but it is also what a lost pin looks like, so it is never silent."""
+    subject = _ingested_subject(container, languages=("he",))
+    service = container.tutorial_service
+    service.generate(subject)
+    stale = service.plan_part_units(subject, outline_version=1)[0]
+    service.generate(subject)
+    assert container.outlines.latest(subject.id).version == 2
+
+    with caplog.at_level(logging.WARNING):
+        assert service.run_unit(stale).part is not None
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("v1" in message and "v2" in message for message in messages)
+
+
+def test_a_reused_outline_version_generates_exactly_the_parts_the_plan_named(container, monkeypatch):
+    """A run that reuses the current version already knows its parts: plan_generation returned
+    them. Re-deriving them would mean planning twice against a subject that can change in between."""
+    subject = _ingested_subject(container, languages=("he",))
+    service = container.tutorial_service
+    service.generate(subject)
+    planned = service.plan_generation(subject, content_only=True)
+
+    calls: list[object] = []
+    real = service.plan_part_units
+    monkeypatch.setattr(service, "plan_part_units", lambda *a, **kw: (calls.append(kw), real(*a, **kw))[1])
+    report = service.generate(subject, content_only=True)
+    # One planning pass, plan_generation's own: generate() ran the units that plan returned.
+    assert len(calls) == 1 and calls[0]["outline_version"] == 1
+    assert [(r.part_position, r.language) for r in report.results] == [
+        (u.part_position, u.language) for u in planned[1:]
+    ]
+
+
+def test_a_subject_job_whose_every_unit_enqueue_failed_fails(container):
+    """One part that could not be handed over is that part's problem; a queue that took none of
+    them means nothing was generated, and a job row saying `done` would be a lie."""
+    subject = _ingested_subject(container, languages=("he",))
+    payload = GenerateSubjectJob(subject_id=subject.id).model_dump(mode="json")
+    job_id = container.jobs.create(GENERATE_SUBJECT, payload)
+    container.conn.commit()
+
+    class BrokenRunner:
+        name = "broken"
+
+        def enqueue(self, kind, payload):
+            raise RuntimeError("queue unreachable")
+
+    with pytest.raises(RuntimeError, match="queue unreachable"):
+        run_generate_subject(
+            payload,
+            job_id,
+            service=container.tutorial_service,
+            subjects=container.subjects,
+            runner=BrokenRunner(),
+            jobs=container.jobs,
+            commit=container.conn.commit,
+        )
