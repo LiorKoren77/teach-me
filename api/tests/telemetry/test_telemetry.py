@@ -7,7 +7,7 @@ from pydantic import BaseModel, ValidationError
 
 from teachme.adapters.embeddings.fake import FakeEmbedder
 from teachme.adapters.llm.fake import FakeLLM
-from teachme.ports.llm import ContentPart, LLMUsage, StructuredRequest
+from teachme.ports.llm import ContentPart, LLMUsage, StructuredRequest, TextRequest
 from teachme.telemetry.prices import ModelPrice, PriceTable
 from teachme.telemetry.recording import RecordingEmbedder, RecordingLLM
 from teachme.telemetry.usage import UsageRecorder, current_usage_context, usage_context
@@ -99,3 +99,18 @@ def test_recording_llm_and_embedder_delegate_and_record():
     assert embedder.inner is fake_embedder
     purposes = [r.purpose for r in repo.rows]
     assert purposes == ["ingest.test", "embed.documents"]
+
+
+def test_recording_llm_records_stream_text():
+    repo = _Repo()
+    llm = RecordingLLM(FakeLLM({}, text_responder=lambda req: "abc"), UsageRecorder(repo, PriceTable()))
+    result = llm.stream_text(
+        TextRequest(
+            purpose="learn.reexplain",
+            model="fake-model",
+            system="s",
+            parts=(ContentPart.of_text("x"),),
+        ),
+        on_delta=lambda d: None,
+    )
+    assert result.text == "abc" and repo.rows[-1].purpose == "learn.reexplain"

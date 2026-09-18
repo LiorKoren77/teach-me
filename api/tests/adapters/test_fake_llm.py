@@ -4,7 +4,7 @@ import pytest
 from pydantic import BaseModel
 
 from teachme.adapters.llm.fake import FakeLLM
-from teachme.ports.llm import ContentPart, LLMParseError, StructuredRequest
+from teachme.ports.llm import ContentPart, LLMParseError, StructuredRequest, TextRequest
 
 
 class Out(BaseModel):
@@ -45,3 +45,14 @@ def test_fake_records_cached_context():
         purpose="t", model="m", system="s", parts=(ContentPart.of_text("x"),), cached_context="C"
     )
     assert fake.generate_structured(req, Out).output.echo == "C"
+
+
+def test_fake_stream_text_uses_text_responder():
+    fake = FakeLLM({}, text_responder=lambda req: "streamed reply")
+    seen = []
+    result = fake.stream_text(
+        TextRequest(purpose="t", model="m", system="s", parts=(ContentPart.of_text("x"),)),
+        on_delta=seen.append,
+    )
+    assert "".join(seen) == "streamed reply" and result.text == "streamed reply"
+    assert fake.calls[-1].purpose == "t"

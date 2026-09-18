@@ -12,9 +12,12 @@ from teachme.ports.llm import (
     LLMParseError,
     LLMRefused,
     LLMUsage,
+    OnDelta,
     StructuredRequest,
     StructuredResult,
     T,
+    TextRequest,
+    TextResult,
 )
 
 MEDIA_TYPES = frozenset(
@@ -75,8 +78,35 @@ class AnthropicLLM:
         )
         return StructuredResult(output=output, usage=usage, model=message.model)
 
+    def stream_text(self, request: TextRequest, *, on_delta: OnDelta) -> TextResult:
+        """Prose as it is produced: `text_stream` yields only the text deltas (thinking blocks are
+        skipped by the SDK), and the accumulated final message carries the usage."""
+        pieces: list[str] = []
+        with self._client.messages.stream(
+            model=request.model,
+            max_tokens=request.max_tokens,
+            system=_system_blocks(request),
+            thinking={"type": "adaptive"},
+            output_config={"effort": request.effort},
+            messages=[{"role": "user", "content": [_to_block(part) for part in request.parts]}],
+        ) as stream:
+            for delta in stream.text_stream:
+                pieces.append(delta)
+                on_delta(delta)
+            message = stream.get_final_message()
 
-def _system_blocks(request: StructuredRequest) -> list[dict[str, Any]]:
+        if message.stop_reason == "refusal":
+            raise LLMRefused(f"{request.purpose}: model refused the request")
+        usage = LLMUsage(
+            input_tokens=message.usage.input_tokens,
+            output_tokens=message.usage.output_tokens,
+            cache_read_tokens=message.usage.cache_read_input_tokens or 0,
+            cache_write_tokens=message.usage.cache_creation_input_tokens or 0,
+        )
+        return TextResult(text="".join(pieces), usage=usage, model=message.model)
+
+
+def _system_blocks(request: StructuredRequest | TextRequest) -> list[dict[str, Any]]:
     """Cache the stable prefix. With a cached_context the instructions follow it uncached, so the
     same corpus is reused by every generation step; without one the instructions are the prefix."""
     if request.cached_context:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal, Protocol, TypeVar
 
@@ -10,6 +11,8 @@ from pydantic import BaseModel
 # own PEP 695 parameter instead.
 T = TypeVar("T", bound=BaseModel)
 Effort = Literal["low", "medium", "high"]
+OnDelta = Callable[[str], None]
+"""Called with each text delta as it arrives, so a route can forward it to the client."""
 
 
 class LLMError(Exception):
@@ -67,6 +70,19 @@ class StructuredRequest:
 
 
 @dataclass(frozen=True)
+class TextRequest:
+    """Free-form prose instead of a schema: the caller consumes the deltas as they arrive."""
+
+    purpose: str
+    model: str
+    system: str
+    parts: tuple[ContentPart, ...]
+    max_tokens: int = 8000
+    effort: Effort = "medium"
+    cached_context: str | None = None
+
+
+@dataclass(frozen=True)
 class LLMUsage:
     input_tokens: int
     output_tokens: int
@@ -85,9 +101,18 @@ class StructuredResult[T: BaseModel]:
     model: str
 
 
+@dataclass(frozen=True)
+class TextResult:
+    text: str
+    usage: LLMUsage
+    model: str
+
+
 class LLMProvider(Protocol):
     name: str
 
     def capabilities(self) -> LLMCapabilities: ...
 
     def generate_structured(self, request: StructuredRequest, schema: type[T]) -> StructuredResult[T]: ...
+
+    def stream_text(self, request: TextRequest, *, on_delta: OnDelta) -> TextResult: ...

@@ -4,7 +4,16 @@ import time
 from collections.abc import Sequence
 
 from teachme.ports.embeddings import Embedder, EmbeddingResult
-from teachme.ports.llm import LLMCapabilities, LLMProvider, StructuredRequest, StructuredResult, T
+from teachme.ports.llm import (
+    LLMCapabilities,
+    LLMProvider,
+    OnDelta,
+    StructuredRequest,
+    StructuredResult,
+    T,
+    TextRequest,
+    TextResult,
+)
 from teachme.telemetry.usage import UsageRecorder
 
 
@@ -26,6 +35,18 @@ class RecordingLLM:
     def generate_structured(self, request: StructuredRequest, schema: type[T]) -> StructuredResult[T]:
         started = time.perf_counter()
         result = self._inner.generate_structured(request, schema)
+        self._recorder.record_llm(
+            purpose=request.purpose,
+            provider=self._inner.name,
+            model=result.model,
+            usage=result.usage,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+        )
+        return result
+
+    def stream_text(self, request: TextRequest, *, on_delta: OnDelta) -> TextResult:
+        started = time.perf_counter()
+        result = self._inner.stream_text(request, on_delta=on_delta)
         self._recorder.record_llm(
             purpose=request.purpose,
             provider=self._inner.name,

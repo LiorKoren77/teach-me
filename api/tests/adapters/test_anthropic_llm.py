@@ -12,6 +12,7 @@ from teachme.ports.llm import (
     LLMParseError,
     LLMRefused,
     StructuredRequest,
+    TextRequest,
 )
 
 _MISSING = object()
@@ -142,3 +143,41 @@ def test_without_cached_context_the_single_system_block_is_cached():
     AnthropicLLM(client=client).generate_structured(_request(), Answer)
     system = client.calls[0]["system"]
     assert len(system) == 1 and system[0]["cache_control"] == {"type": "ephemeral"}
+
+
+class _TextStream:
+    """Stands in for the SDK's MessageStream: text deltas then the accumulated final message."""
+
+    def __init__(self, chunks, message):
+        self._chunks = chunks
+        self._message = message
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    @property
+    def text_stream(self):
+        yield from self._chunks
+
+    def get_final_message(self):
+        return self._message
+
+
+def test_stream_text_yields_deltas_then_reports_usage():
+    message = _message()
+    client = _StubClient(message)
+
+    def stream(**kwargs):
+        client.calls.append(kwargs)
+        return _TextStream(["Hel", "lo"], message)
+
+    client.messages = SimpleNamespace(stream=stream)
+    llm = AnthropicLLM(client=client)
+    request = TextRequest(purpose="t", model="claude-opus-5", system="s", parts=(ContentPart.of_text("x"),))
+    collected = []
+    result = llm.stream_text(request, on_delta=collected.append)
+    assert collected == ["Hel", "lo"] and result.text == "Hello"
+    assert result.usage.input_tokens == 120 and "output_format" not in client.calls[0]
