@@ -15,7 +15,7 @@ from teachme.telemetry.prices import PriceTable
 class UsageContext(BaseModel):
     """Who and what a call was for. Set by services, read by the recorder."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     subject_id: UUID | None = None
     source_id: UUID | None = None
@@ -36,7 +36,7 @@ def current_usage_context() -> UsageContext:
 @contextmanager
 def usage_context(**fields: object) -> Iterator[None]:
     """Nest freely; inner fields override, everything else is inherited."""
-    merged = _current.get().model_copy(update=fields)
+    merged = UsageContext(**{**_current.get().model_dump(), **fields})
     token = _current.set(merged)
     try:
         yield

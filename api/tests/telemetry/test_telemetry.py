@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from pydantic import BaseModel
+import pytest
+from pydantic import BaseModel, ValidationError
 
 from teachme.adapters.embeddings.fake import FakeEmbedder
 from teachme.adapters.llm.fake import FakeLLM
@@ -46,6 +47,18 @@ def test_usage_context_nests_and_resets():
             assert ctx.subject_id == sid and ctx.source_id == src
         assert current_usage_context().source_id is None
     assert current_usage_context().subject_id is None
+
+
+def test_usage_context_rejects_unknown_field():
+    with pytest.raises(ValidationError):
+        with usage_context(subjectid=uuid4()):
+            pass
+
+
+def test_usage_context_rejects_mistyped_field():
+    with pytest.raises(ValidationError):
+        with usage_context(subject_id="not-a-uuid"):
+            pass
 
 
 def test_recorder_writes_row_with_context_and_cost():
