@@ -1,0 +1,1 @@
+Identify the main language of the body text you are given. Return the ISO 639-1 two-letter code and the English name of the language. If the text mixes languages, pick the language of the majority of the body text, ignoring quotations, glossaries and page furniture. If you cannot tell, return code "und" and name "Undetermined".

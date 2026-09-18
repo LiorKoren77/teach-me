@@ -41,6 +41,9 @@ package-dir = {"" = "api"}
 where = ["api"]
 include = ["teachme*"]
 
+[tool.setuptools.package-data]
+teachme = ["**/*.md", "**/*.sql"]
+
 [tool.pytest.ini_options]
 testpaths = ["api/tests"]
 pythonpath = ["api"]
