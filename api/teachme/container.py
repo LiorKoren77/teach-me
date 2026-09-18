@@ -14,7 +14,8 @@ from teachme.adapters.file_store.prefixed import PrefixedFileStore
 from teachme.adapters.job_runner.inprocess import InProcessJobRunner
 from teachme.adapters.llm.fake import FakeLLM
 from teachme.adapters.reranker.noop import NoopReranker
-from teachme.ingestion.fake_responders import default_responders
+from teachme.generation.fake_responders import default_responders as generation_responders
+from teachme.ingestion.fake_responders import default_responders as ingestion_responders
 from teachme.ingestion.pipeline import IngestionPipeline, PipelineDeps
 from teachme.ports.embeddings import Embedder
 from teachme.ports.file_store import FileStore
@@ -51,7 +52,7 @@ def build_llm(settings: Settings) -> LLMProvider:
         from teachme.adapters.llm.anthropic import AnthropicLLM
 
         return AnthropicLLM(api_key=_secret(settings.anthropic_api_key))
-    return FakeLLM(default_responders())
+    return FakeLLM({**ingestion_responders(), **generation_responders()})
 
 
 def build_embedder(settings: Settings) -> Embedder:
