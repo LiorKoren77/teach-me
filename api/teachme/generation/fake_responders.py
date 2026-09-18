@@ -25,11 +25,26 @@ def _user_text(request: StructuredRequest) -> str:
 
 def _outline(request: StructuredRequest) -> BaseModel:
     text = _user_text(request)
-    if match := _ALL_PAGES.search(text):
+    if request.purpose == "gen.outline_merge":
+        partials = _parse_partial_outlines(text)
+        last = max(part.page_end for partial in partials for part in partial.parts)
+        return _build_outline(0, last)
+    if request.purpose == "gen.outline_source":
+        match = _PAGE_RANGE.search(text)
+        if match is None:
+            raise ValueError("gen.outline_source: no page range in the outline brief")
+        first, last = int(match.group(1)), int(match.group(2))
+    elif request.purpose == "gen.outline":
+        match = _ALL_PAGES.search(text)
+        if match is None:
+            raise ValueError("gen.outline: no page count in the outline brief")
         first, last = 0, int(match.group(1)) - 1
     else:
-        rng = _PAGE_RANGE.search(text)
-        first, last = int(rng.group(1)), int(rng.group(2))
+        raise ValueError(f"_outline: unsupported purpose {request.purpose!r}")
+    return _build_outline(first, last)
+
+
+def _build_outline(first: int, last: int) -> OutlineOut:
     parts = []
     start = first
     while start <= last:
@@ -41,6 +56,25 @@ def _outline(request: StructuredRequest) -> BaseModel:
         parts.append(PartOut(title=f"Part {start}-{end}", page_start=start, page_end=end, sections=sections))
         start = end + 1
     return OutlineOut(parts=parts)
+
+
+def _parse_partial_outlines(text: str) -> list[OutlineOut]:
+    """The gen.outline_merge user text is "Partial outlines in source order:" followed by each
+    partial's OutlineOut JSON, blank-line separated (plus, on a retry, validation feedback text
+    appended the same way) - so parse every blank-line-separated chunk that is valid JSON and
+    ignore the rest."""
+    partials = []
+    for chunk in re.split(r"\n\n+", text):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        try:
+            partials.append(OutlineOut.model_validate_json(chunk))
+        except ValueError:
+            continue
+    if not partials:
+        raise ValueError("gen.outline_merge: no partial outlines found in the merge brief")
+    return partials
 
 
 def _glossary(request: StructuredRequest) -> BaseModel:

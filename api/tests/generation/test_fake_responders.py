@@ -8,7 +8,7 @@ from teachme.adapters.llm.fake import FakeLLM
 from teachme.domain.models import GlossaryTerm
 from teachme.generation.fake_responders import _questions, default_responders
 from teachme.generation.glossary import generate_glossary, translate_glossary
-from teachme.generation.outline import generate_outline
+from teachme.generation.outline import generate_outline, validate_outline
 from teachme.generation.question_bank import generate_question_bank, validate_bank
 from teachme.generation.teaching import generate_teaching
 from teachme.ingestion.fake_responders import default_responders as ingestion_responders
@@ -74,6 +74,20 @@ def test_question_responder_keeps_every_section_covered_when_count_is_tight():
         llm, "fake-model", "Geo", "he", corpus, part, sections, teaching, terms, {}, count=4
     )
     assert validate_bank(bank, sections, {t.slug for t in terms}, min_per_section=2) == []
+
+
+def test_outline_responder_dispatches_on_purpose_for_large_corpus_merge(monkeypatch):
+    """gen.outline_merge used to sniff the user text for the all-pages/page-range phrases, which
+    the merge prompt never contains, crashing with AttributeError on a None regex match."""
+    import teachme.generation.outline as outline_module
+
+    monkeypatch.setattr(outline_module, "LARGE_CORPUS_CHARS", 10)  # force the per-source-then-merge path
+    llm = FakeLLM({**ingestion_responders(), **default_responders()})
+    corpus = _corpus(12, sources=3)
+    out = generate_outline(llm, "fake-model", "Geo", corpus)
+    purposes = [call.purpose for call in llm.calls if call.purpose.startswith("gen.outline")]
+    assert purposes == ["gen.outline_source", "gen.outline_source", "gen.outline_source", "gen.outline_merge"]
+    assert validate_outline(out, corpus.total_pages) == []
 
 
 def test_question_responder_requires_section_lines():
