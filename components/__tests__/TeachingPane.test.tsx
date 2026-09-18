@@ -7,6 +7,8 @@ describe("TeachingPane", () => {
   it("renders markdown and a thumbnail per figure", () => {
     render(<TeachingPane title="Intro" body={"# Heading\n\nLook at page 12.\n\n- a"} keyPoints={["k1"]}
                          figures={[{ page: 12, src: "blob:page-12" }]} strings={t("en")} reexplanation={null} />);
+    expect(screen.getByRole("heading", { name: "Teaching" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Intro" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Heading" })).toBeInTheDocument();
     expect(screen.getByText("k1")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Page 12" })).toHaveAttribute("src", "blob:page-12");

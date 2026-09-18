@@ -29,7 +29,8 @@ export function TeachingPane({ title, body, keyPoints, figures, strings, reexpla
         </div>
       ) : null}
 
-      <h2 className="text-xl font-semibold">{title}</h2>
+      <h2 className="text-sm font-medium text-stone-500">{strings.teaching}</h2>
+      <h3 className="text-xl font-semibold">{title}</h3>
       <div className={PROSE}>
         <Markdown remarkPlugins={[remarkGfm]}>{body}</Markdown>
       </div>

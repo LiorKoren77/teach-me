@@ -7,11 +7,12 @@ import { useLanguage } from "@/hooks/useLanguage";
 import { useSubjects } from "@/hooks/useSubjects";
 import type { Language, SubjectSummary } from "@/lib/api/types";
 import { LANGUAGES, t } from "@/lib/i18n";
+import { isAdmin } from "@/lib/role";
 
 const EVERY_LANGUAGE: Language[] = LANGUAGES.map((l) => l.code);
 
 export default function Home() {
-  const { isLoaded, isSignedIn } = useAuth();
+  const { isLoaded, isSignedIn, sessionClaims } = useAuth();
   const { language, chooseLanguage } = useLanguage();
   const strings = t(language);
   const { subjects, error } = useSubjects();
@@ -23,9 +24,11 @@ export default function Home() {
         {isLoaded && isSignedIn ? (
           <div className="flex items-center gap-4">
             <LanguagePicker value={language} options={EVERY_LANGUAGE} onChange={chooseLanguage} label={strings.language} />
-            <Link className="text-sm underline" href="/admin">
-              {strings.admin}
-            </Link>
+            {isAdmin(sessionClaims) ? (
+              <Link className="text-sm underline" href="/admin">
+                {strings.admin}
+              </Link>
+            ) : null}
             <UserButton />
           </div>
         ) : null}
@@ -49,7 +52,7 @@ export default function Home() {
             <ul className="flex flex-col gap-3">
               {subjects.map((subject) => (
                 <li key={subject.id}>
-                  <SubjectCard subject={subject} partOf={strings.partOf} />
+                  <SubjectCard subject={subject} partsPassed={strings.partsPassed} />
                 </li>
               ))}
             </ul>
@@ -60,7 +63,7 @@ export default function Home() {
   );
 }
 
-function SubjectCard({ subject, partOf }: { subject: SubjectSummary; partOf: (n: number, total: number) => string }) {
+function SubjectCard({ subject, partsPassed }: { subject: SubjectSummary; partsPassed: (n: number, total: number) => string }) {
   const done = subject.parts_total === 0 ? 0 : Math.round((subject.parts_passed / subject.parts_total) * 100);
   return (
     <Link
@@ -69,7 +72,7 @@ function SubjectCard({ subject, partOf }: { subject: SubjectSummary; partOf: (n:
     >
       <span className="flex items-baseline justify-between gap-4">
         <span className="font-medium">{subject.name}</span>
-        <span className="text-sm text-stone-600">{partOf(subject.parts_passed, subject.parts_total)}</span>
+        <span className="text-sm text-stone-600">{partsPassed(subject.parts_passed, subject.parts_total)}</span>
       </span>
       <span className="mt-3 block h-2 w-full overflow-hidden rounded bg-stone-200">
         <span className="block h-full rounded bg-stone-700" style={{ width: `${done}%` }} />

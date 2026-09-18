@@ -53,6 +53,9 @@ Environment (in `.env.local`, never committed; placeholders live in `.env.exampl
   will not sign anyone in without it. With no key at all `next build` still succeeds, because
   the root layout reads the language cookie and every route is therefore rendered on demand.
 - `CLERK_SECRET_KEY` - Clerk secret key, used by the proxy to verify sessions.
+- `NEXT_PUBLIC_CLERK_SIGN_IN_URL` / `..._SIGN_UP_URL` and the matching
+  `..._FALLBACK_REDIRECT_URL`s - optional, commented out in `.env.example`: unset, Clerk uses its
+  hosted pages, which is what this app does.
 - `BACKEND_URL` - optional; where `next dev` sends `/api/*`, default `http://localhost:8000`.
   `next.config.ts` adds that rewrite unless `VERCEL` is set, since on Vercel the Python
   function serves `/api` itself.
@@ -81,6 +84,14 @@ the re-explanation shows its notice for as long as the stream is open, because t
 the whole re-explanation before it sends a byte (see "Re-explanation stream"); the next round
 stays disabled until the `done` event arrives, and the text stays on screen through that round,
 since it is keyed on the failed round rather than on the round result the screen is holding.
+
+The dialog shows the feedback for the answer just graded together with the next question, rather
+than one after the other as the spec's wording suggests: the API answers a submit with both, and
+holding the question back would cost a round trip and a second wait for nothing.
+
+The Admin link is offered only to a reader whose session token carries the admin role
+(`lib/role.ts` reads the same `role` claim the API verifies); the page and every route behind it
+check for themselves regardless.
 
 Failed requests are shown, not printed: `lib/api/errors.ts` maps an `ApiError` status (401, 403,
 409, 429, anything else) to a key in the `errors` block of `lib/i18n.ts`, `hooks/useApiError.ts`

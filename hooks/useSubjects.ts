@@ -11,7 +11,17 @@ export function useSubjects() {
   const { error, fail } = useApiError();
   useEffect(() => {
     if (!isSignedIn) return;
-    listSubjects(getToken).then(setSubjects).catch(fail);
+    let cancelled = false;
+    listSubjects(getToken)
+      .then((rows) => {
+        if (!cancelled) setSubjects(rows);
+      })
+      .catch((failure) => {
+        if (!cancelled) fail(failure);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [isSignedIn, getToken, fail]);
   return { subjects, error };
 }
@@ -23,7 +33,17 @@ export function useSources(subjectId: string) {
   const { error, fail } = useApiError();
   useEffect(() => {
     if (!isSignedIn) return;
-    listSources(subjectId, getToken).then(setSources).catch(fail);
+    let cancelled = false;
+    listSources(subjectId, getToken)
+      .then((rows) => {
+        if (!cancelled) setSources(rows);
+      })
+      .catch((failure) => {
+        if (!cancelled) fail(failure);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [isSignedIn, subjectId, getToken, fail]);
   return { sources, error };
 }

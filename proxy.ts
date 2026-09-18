@@ -25,5 +25,5 @@ export default clerkMiddleware(async (auth, request) => {
 
 export const config = {
   // Everything but Next's own assets, the API and files with an extension.
-  matcher: ["/((?!_next|api|.*\\..*).*)"],
+  matcher: ["/((?!_next|api(?:/|$)|.*\\..*).*)"],
 };
