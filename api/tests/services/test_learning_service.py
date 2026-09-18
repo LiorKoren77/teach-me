@@ -15,6 +15,7 @@ from teachme.domain.models import (
 )
 from teachme.grading.grader import GradeOut
 from teachme.grading.relevance_check import RelevanceVerdict
+from teachme.repositories.attempts import AttemptRepository
 from teachme.services.learning import BankExhausted, LearningError, NotAllowed
 from teachme.settings import Settings
 from tests.helpers import make_pdf
@@ -295,3 +296,86 @@ def test_an_exhausted_question_bank_stalls_the_part_instead_of_locking_it(env):
     assert retry.status == PartStatus.LEARNING and retry.attempt_id != session.attempt_id
     reopened = c.learning_service.begin_round(USER, retry.attempt_id)
     assert reopened.round_no == 1 and reopened.total_in_round == subject.questions_per_round
+
+
+def _grader_calls(fake):
+    return sum(1 for r in fake.calls if r.purpose == "learn.grade")
+
+
+def test_answers_are_recorded_once_even_under_concurrent_submission(env, db):
+    """Two submissions of the same question interleave: both pass the "still open" read, but only
+    the first write lands, and the second is refused instead of overwriting a stored verdict."""
+    c, subject, fake = env
+    session = c.learning_service.start_part(USER, subject, position=0, language="en")
+    question = c.learning_service.begin_round(USER, session.attempt_id)
+    rival = AttemptRepository(db)
+
+    def grade_while_the_rival_commits(_req):
+        rival.record_answer(
+            question.attempt_question_id,
+            answer_text="the rival answer",
+            answer_choice=None,
+            relevance_score=None,
+            band=None,
+            route=Route.GRADER,
+            check_verdict=None,
+            grade=Grade.PARTIAL,
+            rubric_covered=(),
+            missed_concepts=(),
+            feedback="rival feedback",
+        )
+        db.commit()
+        return _grade("correct")(_req)
+
+    fake.set_responder(GradeOut, grade_while_the_rival_commits)
+    with pytest.raises(NotAllowed, match="not open"):
+        c.learning_service.submit_answer(
+            USER,
+            session.attempt_id,
+            question.attempt_question_id,
+            answer_text="The ozone layer of the atmosphere absorbs radiation.",
+        )
+    stored = c.attempts.get_question(question.attempt_question_id)
+    assert stored.grade == Grade.PARTIAL and stored.feedback == "rival feedback"
+
+    graded = _grader_calls(fake)
+    fake.set_responder(GradeOut, _grade("correct"))
+    with pytest.raises(NotAllowed, match="not open"):
+        c.learning_service.submit_answer(
+            USER, session.attempt_id, question.attempt_question_id, answer_text="another try"
+        )
+    assert _grader_calls(fake) == graded  # a closed question never reaches the grader again
+
+
+def test_a_round_already_sampled_elsewhere_is_reported_as_unfinished(env, db):
+    c, subject, fake = env
+    fake.set_responder(GradeOut, _grade("incorrect"))
+    session = c.learning_service.start_part(USER, subject, position=0, language="en")
+    first = c.learning_service.begin_round(USER, session.attempt_id)
+    _answer_all(c, session.attempt_id, first)
+    part_id = c.attempts.get(session.attempt_id).part_id
+
+    rival = AttemptRepository(db)
+    spare = next(
+        q
+        for q in c.questions.for_part(part_id, "en")
+        if q.id not in c.attempts.asked_question_ids(session.attempt_id)
+    )
+    rival_row = rival.add_questions(session.attempt_id, round_no=2, question_ids=[spare.id])[0]
+    rival.record_answer(
+        rival_row.id,
+        answer_text="already answered",
+        answer_choice=None,
+        relevance_score=None,
+        band=None,
+        route=Route.GRADER,
+        check_verdict=None,
+        grade=Grade.CORRECT,
+        rubric_covered=(),
+        missed_concepts=(),
+        feedback="ok",
+    )
+    db.commit()
+
+    with pytest.raises(LearningError, match="not finished"):
+        c.learning_service.begin_round(USER, session.attempt_id)

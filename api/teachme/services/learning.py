@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
+from typing import Any
 from uuid import UUID
 
 import psycopg
@@ -206,9 +207,14 @@ class LearningService:
         round_no = attempt.round_no + 1
         try:
             self.d.attempts.set_round(attempt.id, round_no)
-            rows = self.d.attempts.add_questions(
-                attempt.id, round_no=round_no, question_ids=[q.id for q in picked]
-            )
+            try:
+                rows = self.d.attempts.add_questions(
+                    attempt.id, round_no=round_no, question_ids=[q.id for q in picked]
+                )
+            except psycopg.errors.UniqueViolation as exc:
+                # attempt_questions is unique on (attempt, round, position): another call already
+                # sampled this round, so this one is a duplicate begin_round, not a new round.
+                raise LearningError("the current round is not finished") from exc
             self.d.progress.update(progress.id, status=PartStatus.QUIZZING)
             self.d.conn.commit()
         except Exception:
@@ -272,7 +278,7 @@ class LearningService:
             raise NotAllowed("choose an option")
         grade = Grade.CORRECT if answer_choice == question.correct_choice else Grade.INCORRECT
         feedback = message(attempt.language, "mc_correct" if grade == Grade.CORRECT else "mc_incorrect")
-        self.d.attempts.record_answer(
+        self._record_answer(
             aq.id,
             answer_text=None,
             answer_choice=answer_choice,
@@ -349,7 +355,7 @@ class LearningService:
             self._glossary_view(subject, outline.id),
             evidence,
         )
-        self.d.attempts.record_answer(
+        self._record_answer(
             aq.id,
             answer_text=answer,
             answer_choice=None,
@@ -464,7 +470,7 @@ class LearningService:
                 next_question=current,
             )
         feedback = message(attempt.language, "rejected_final")
-        self.d.attempts.record_answer(
+        self._record_answer(
             aq.id,
             answer_text=answer,
             answer_choice=None,
@@ -482,6 +488,12 @@ class LearningService:
         )
         result.rejection_reason = reason
         return result
+
+    def _record_answer(self, attempt_question_id: UUID, **fields: Any) -> None:
+        """Answering is read, then model call, then write, and the write is what decides the race:
+        a question another submission has graded in the meantime is refused, not overwritten."""
+        if self.d.attempts.record_answer(attempt_question_id, **fields) == 0:
+            raise NotAllowed("question is not open for answering")
 
     def _after_answer(
         self,

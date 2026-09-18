@@ -181,11 +181,17 @@ class AttemptRepository:
         rubric_covered: Sequence[int],
         missed_concepts: Sequence[str],
         feedback: str | None,
-    ) -> None:
-        self._conn.execute(
+    ) -> int:
+        """Rows written: 0 when the question already carries a grade.
+
+        `grade IS NULL` makes the write the point where two submissions of the same question are
+        decided, instead of the read that preceded them: the second one overwrote the first
+        verdict, and the student saw feedback for an answer that was not the recorded one."""
+        result = self._conn.execute(
             "UPDATE attempt_questions SET answer_text = %s, answer_choice = %s, relevance_score = %s,"
             " relevance_band = %s, route = %s, check_verdict = %s, grade = %s, rubric_covered = %s,"
-            " missed_concepts = %s, feedback = %s, answered_at = now() WHERE id = %s",
+            " missed_concepts = %s, feedback = %s, answered_at = now()"
+            " WHERE id = %s AND grade IS NULL",
             (
                 answer_text,
                 answer_choice,
@@ -200,6 +206,7 @@ class AttemptRepository:
                 attempt_question_id,
             ),
         )
+        return result.rowcount
 
     def increment_rejections(self, attempt_question_id: UUID) -> int:
         row = self._conn.execute(
