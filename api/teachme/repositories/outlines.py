@@ -64,7 +64,9 @@ class OutlineRepository:
                 (outline_id, subject_id, model, subject_id),
             ).fetchone()
         except psycopg.errors.UniqueViolation as exc:
-            raise OutlineVersionConflict(subject_id) from exc
+            raise OutlineVersionConflict(
+                f"another generate is running for subject {subject_id}; retry once it finishes"
+            ) from exc
         return _outline(row)
 
     def get(self, outline_id: UUID) -> Outline:

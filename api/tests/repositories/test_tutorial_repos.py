@@ -56,7 +56,7 @@ def test_outline_create_raises_conflict_on_unique_violation(db, monkeypatch):
         raise psycopg.errors.UniqueViolation("duplicate key value violates unique constraint")
 
     monkeypatch.setattr(db, "execute", boom)
-    with pytest.raises(OutlineVersionConflict):
+    with pytest.raises(OutlineVersionConflict, match=f"another generate is running for subject {subject.id}"):
         repo.create(subject.id, model="fake-model")
 
 

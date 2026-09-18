@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import psycopg
 import pytest
 from typer.testing import CliRunner
 
@@ -7,7 +8,6 @@ from teachme.adapters.db.migrate import SchemaOutOfDate
 from teachme.container import Container
 from teachme.generation.teaching import TeachingOut
 from teachme.ports.llm import LLMError
-from teachme.repositories.outlines import OutlineVersionConflict
 from teachme.settings import Settings
 from tests.helpers import make_pdf
 
@@ -213,13 +213,23 @@ def test_generate_reports_an_outline_version_conflict_as_an_operator_error(cli, 
 
     app, pdf, tmp_path = cli
     assert runner.invoke(app, ["ingest", "--subject", "Geo", "--yes", str(pdf)]).exit_code == 0
+    container = main.build_container()
+    subject = container.subject_service.require("Geo")
+    real_execute = container.conn.execute
 
-    def boom(*args, **kwargs):
-        raise OutlineVersionConflict("another generate won the race for version 2")
+    # Only the outline insert fails, so `generate` still runs the real OutlineRepository.create()
+    # (and its real except-branch message) instead of a hand-picked message the CLI would never
+    # actually see; every other query on the shared connection behaves normally.
+    def selective_conflict(query, *args, **kwargs):
+        if isinstance(query, str) and "INSERT INTO outlines" in query:
+            raise psycopg.errors.UniqueViolation("duplicate key value violates unique constraint")
+        return real_execute(query, *args, **kwargs)
 
-    monkeypatch.setattr(main.build_container().tutorial_service, "generate", boom)
+    monkeypatch.setattr(container.conn, "execute", selective_conflict)
     result = runner.invoke(app, ["generate", "--subject", "Geo"])
-    assert result.exit_code == 1 and "error: another generate won the race" in result.output
+    assert result.exit_code == 1
+    assert f"error: another generate is running for subject {subject.id}" in result.output
+    assert "retry once it finishes" in result.output
 
 
 def test_tutorial_show_names_the_outline_version_and_can_render_a_draft(cli):

@@ -6,7 +6,7 @@ import pytest
 
 from teachme.adapters.llm.fake import FakeLLM
 from teachme.domain.models import GlossaryTerm
-from teachme.generation.fake_responders import _questions, default_responders
+from teachme.generation.fake_responders import _glossary, _questions, default_responders
 from teachme.generation.glossary import generate_glossary, translate_glossary
 from teachme.generation.outline import generate_outline, validate_outline
 from teachme.generation.question_bank import generate_question_bank, validate_bank
@@ -96,3 +96,22 @@ def test_question_responder_requires_section_lines():
     )
     with pytest.raises(ValueError, match="no SECTION lines"):
         _questions(request)
+
+
+def test_question_responder_requires_a_count_line():
+    request = StructuredRequest(
+        purpose="gen.questions",
+        model="m",
+        system="s",
+        parts=(ContentPart.of_text("SECTION 0: What (pages 0-1)"),),
+    )
+    with pytest.raises(ValueError, match="no COUNT line"):
+        _questions(request)
+
+
+def test_glossary_responder_requires_an_all_pages_line():
+    request = StructuredRequest(
+        purpose="gen.glossary", model="m", system="s", parts=(ContentPart.of_text(""),)
+    )
+    with pytest.raises(ValueError, match="no page count"):
+        _glossary(request)

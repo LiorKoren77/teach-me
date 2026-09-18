@@ -78,7 +78,10 @@ def _parse_partial_outlines(text: str) -> list[OutlineOut]:
 
 
 def _glossary(request: StructuredRequest) -> BaseModel:
-    total = int(_ALL_PAGES.search(_user_text(request)).group(1))
+    match = _ALL_PAGES.search(_user_text(request))
+    if match is None:
+        raise ValueError("gen.glossary: no page count in the glossary brief")
+    total = int(match.group(1))
     return GlossaryOut(
         terms=[
             TermOut(slug="biosphere", term="biosfera", definition="Fake definition one.", pages=[0]),
@@ -119,7 +122,10 @@ def _questions(request: StructuredRequest) -> BaseModel:
     positions = [int(m.group(1)) for m in _SECTION.finditer(text)]
     if not positions:
         raise ValueError("no SECTION lines in the question brief")
-    count = int(_COUNT.search(text).group(1))
+    count_match = _COUNT.search(text)
+    if count_match is None:
+        raise ValueError("gen.questions: no COUNT line in the question brief")
+    count = int(count_match.group(1))
     slugs = [m.group(1) for m in _TERM.finditer(text)]
     placeholder = f" {{{{term:{slugs[0]}|fake-words}}}}" if slugs else ""
     questions: list[QuestionOut] = []
