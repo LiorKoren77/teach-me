@@ -8,7 +8,9 @@ import pytest
 
 from teachme.container import ConfigurationError
 from teachme.domain.models import SourceStatus
+from teachme.generation.outline import OutlineOut
 from teachme.ingestion.detect_language import DetectedLanguage
+from teachme.ports.llm import ContentPart, StructuredRequest
 from tests.helpers import make_pdf
 
 
@@ -33,6 +35,24 @@ def test_container_builds_fake_stack_and_is_ready(make_container):
     assert container.files.name == "local" and container.job_runner.name == "inprocess"
     assert [s.name for s in container.bundle_stores] == ["local:digest/", "local"]
     assert container.pipeline is container.pipeline  # cached
+
+    # build_llm's fake stack must serve both the ingestion and generation schemas.
+    language = container.llm.inner.generate_structured(
+        StructuredRequest(purpose="ingest.detect_language", model="fake-model", system="s", parts=()),
+        DetectedLanguage,
+    )
+    assert isinstance(language.output, DetectedLanguage)
+
+    outline = container.llm.inner.generate_structured(
+        StructuredRequest(
+            purpose="gen.outline",
+            model="fake-model",
+            system="s",
+            parts=(ContentPart.of_text("Design the outline for all 3 pages of the corpus."),),
+        ),
+        OutlineOut,
+    )
+    assert isinstance(outline.output, OutlineOut)
 
 
 def test_s3_without_bucket_is_a_configuration_error(make_container):
