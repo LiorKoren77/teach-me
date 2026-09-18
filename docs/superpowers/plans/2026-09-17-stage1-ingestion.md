@@ -15,11 +15,11 @@
 ## Conventions for every task
 
 - Work in `/home/frtlx/liorkoren77/teach-me`. Activate the venv: `source .venv/bin/activate` (created in Task 1).
-- Run tests with `pytest -q`. Database tests need `TEST_DATABASE_URL`; they skip cleanly when it is unset. `docker compose up -d` (Task 1) provides it at `postgresql://teachme:teachme@localhost:5432/teachme_test`.
+- Run tests with `pytest -q`. Database tests need `TEST_DATABASE_URL`; they skip cleanly when it is unset. `docker compose up -d` (Task 1) provides it at `postgresql://teachme:teachme@localhost:5433/teachme_test` (host port 5433: a native Postgres occupies 5432 on the dev machine).
 - Commit after each task with the message given. Always commit as the repo-local identity (already configured: LiorKoren77). Never use the company GitHub account.
 - Every Python file starts with `from __future__ import annotations`.
 - No vendor SDK import outside `api/teachme/adapters/`. `ruff` enforces line length 110.
-- **Pydantic rule.** Anything validated at a boundary or serialized is a pydantic `BaseModel`: settings, LLM output schemas, domain models, digest bundle files, CLI/API payloads. Plain `dataclass` only for internal transport objects that never leave the process (port request/result types, search hits). Pydantic models are constructed with keyword arguments only.
+- **Pydantic rule.** Anything validated at a boundary or serialized is a pydantic `BaseModel`: settings, LLM output schemas, domain models, digest bundle files, CLI/API payloads. Plain `dataclass` only for internal transport objects that never leave the process (port request/result types). Search hits (`ChunkHit`) are pydantic because they are serialized to the API later. Pydantic models are constructed with keyword arguments only.
 
 ## File structure
 
@@ -136,7 +136,12 @@ services:
       POSTGRES_PASSWORD: teachme
       POSTGRES_DB: teachme
     ports:
-      - "5432:5432"
+      - "5433:5432"   # host 5433: a native Postgres occupies 5432 on the dev machine
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U teachme -d teachme"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./docker/initdb:/docker-entrypoint-initdb.d:ro
@@ -155,7 +160,7 @@ CREATE DATABASE teachme_test;
 ```bash
 # Database (local docker default). Vercel injects the hosted URL as DATABASE_URL.
 DATABASE_URL=postgresql://teachme:teachme@localhost:5432/teachme
-TEST_DATABASE_URL=postgresql://teachme:teachme@localhost:5432/teachme_test
+TEST_DATABASE_URL=postgresql://teachme:teachme@localhost:5433/teachme_test
 
 # Adapters. Values: anthropic|fake, voyage|fake, voyage|noop, local|vercel_blob|s3, inprocess|sqs
 LLM_PROVIDER=anthropic
@@ -329,10 +334,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import field_validator
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-SUPPORTED_LANGUAGES = ("he", "en", "pt")
+from teachme.domain.languages import LANGUAGES
 
 
 class Settings(BaseSettings):
@@ -340,7 +345,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=(".env", ".env.local"), extra="ignore")
 
-    database_url: str = "postgresql://teachme:teachme@localhost:5432/teachme"
+    database_url: str = "postgresql://teachme:teachme@localhost:5433/teachme"  # 5433: see docker-compose
 
     llm_provider: Literal["anthropic", "fake"] = "anthropic"
     embeddings_provider: Literal["voyage", "fake"] = "voyage"
@@ -368,12 +373,17 @@ class Settings(BaseSettings):
     pages_per_read_batch: int = 6
     pages_per_chunk_batch: int = 6
 
+    # Credentials are read here and handed to adapters by the container; adapters never read os.environ.
+    anthropic_api_key: SecretStr | None = None
+    voyage_api_key: SecretStr | None = None
+    blob_read_write_token: SecretStr | None = None
+
     @field_validator("enabled_languages")
     @classmethod
     def _known_languages(cls, value: list[str]) -> list[str]:
-        unknown = [code for code in value if code not in SUPPORTED_LANGUAGES]
+        unknown = [code for code in value if code not in LANGUAGES]
         if unknown:
-            raise ValueError(f"unsupported languages: {unknown}; supported: {list(SUPPORTED_LANGUAGES)}")
+            raise ValueError(f"unsupported languages: {unknown}; supported: {sorted(LANGUAGES)}")
         return value
 ```
 
@@ -1175,7 +1185,7 @@ git commit -m "feat: reciprocal rank fusion"
 - Create: `api/tests/conftest.py`
 - Test: `api/tests/adapters/test_migrate.py`
 
-- [ ] **Step 1: Write `api/tests/conftest.py`** (database fixture shared by every DB test)
+- [ ] **Step 1: Write `api/tests/conftest.py`** (database fixture shared by every DB test; if the file already exists from the Task 1-5 fixes, keep its contents and append this)
 
 ```python
 from __future__ import annotations
@@ -1253,7 +1263,7 @@ def test_available_versions_are_sorted_filenames():
 
 - [ ] **Step 3: Run to verify it fails**
 
-Run: `export TEST_DATABASE_URL=postgresql://teachme:teachme@localhost:5432/teachme_test && pytest -q api/tests/adapters/test_migrate.py`
+Run: `export TEST_DATABASE_URL=postgresql://teachme:teachme@localhost:5433/teachme_test && pytest -q api/tests/adapters/test_migrate.py`
 Expected: FAIL with `ModuleNotFoundError: No module named 'teachme.adapters'`
 
 - [ ] **Step 4: Write `engine.py`** (plus empty `adapters/__init__.py` and `adapters/db/__init__.py`)
@@ -2101,8 +2111,9 @@ class AnthropicLLM:
 
     name = "anthropic"
 
-    def __init__(self, client: Anthropic | None = None) -> None:
-        self._client = client or Anthropic(max_retries=5, timeout=600.0)
+    def __init__(self, client: Anthropic | None = None, api_key: str | None = None) -> None:
+        # api_key None lets the SDK resolve ANTHROPIC_API_KEY or federation from the environment.
+        self._client = client or Anthropic(api_key=api_key, max_retries=5, timeout=600.0)
 
     def capabilities(self) -> LLMCapabilities:
         return LLMCapabilities(media_types=MEDIA_TYPES)
@@ -2370,10 +2381,13 @@ _TRANSIENT = (
 class VoyageEmbedder:
     name = "voyage"
 
-    def __init__(self, model: str, dimension: int = 1024, client: Any | None = None, batch_size: int = 128) -> None:
+    def __init__(
+        self, model: str, dimension: int = 1024, client: Any | None = None, batch_size: int = 128,
+        api_key: str | None = None,
+    ) -> None:
         self.model = model
         self.dimension = dimension
-        self._client = client or voyageai.Client()
+        self._client = client or voyageai.Client(api_key=api_key)
         self._batch_size = batch_size
 
     def embed_documents(self, texts: Sequence[str]) -> EmbeddingResult:
@@ -2461,9 +2475,9 @@ _TRANSIENT = (
 class VoyageReranker:
     name = "voyage"
 
-    def __init__(self, model: str, client: Any | None = None) -> None:
+    def __init__(self, model: str, client: Any | None = None, api_key: str | None = None) -> None:
         self.model = model
-        self._client = client or voyageai.Client()
+        self._client = client or voyageai.Client(api_key=api_key)
 
     @retry(
         retry=retry_if_exception_type(_TRANSIENT),
@@ -5393,21 +5407,25 @@ class ConfigurationError(Exception):
     pass
 
 
+def _secret(value) -> str | None:
+    return value.get_secret_value() if value is not None else None
+
+
 def build_llm(settings: Settings) -> LLMProvider:
     if settings.llm_provider == "anthropic":
-        return AnthropicLLM()
+        return AnthropicLLM(api_key=_secret(settings.anthropic_api_key))
     return FakeLLM(default_responders())
 
 
 def build_embedder(settings: Settings) -> Embedder:
     if settings.embeddings_provider == "voyage":
-        return VoyageEmbedder(model=settings.embedding_model)
+        return VoyageEmbedder(model=settings.embedding_model, api_key=_secret(settings.voyage_api_key))
     return FakeEmbedder()
 
 
 def build_reranker(settings: Settings) -> Reranker:
     if settings.reranker_provider == "voyage":
-        return VoyageReranker(model=settings.rerank_model)
+        return VoyageReranker(model=settings.rerank_model, api_key=_secret(settings.voyage_api_key))
     return NoopReranker()
 
 
@@ -5415,7 +5433,7 @@ def build_file_store(settings: Settings) -> FileStore:
     if settings.file_store == "local":
         return LocalFileStore(settings.local_files_dir)
     if settings.file_store == "vercel_blob":
-        return VercelBlobFileStore(prefix=settings.blob_prefix)
+        return VercelBlobFileStore(prefix=settings.blob_prefix, token=_secret(settings.blob_read_write_token))
     if not settings.s3_bucket:
         raise ConfigurationError("FILE_STORE=s3 requires S3_BUCKET")
     return S3FileStore(bucket=settings.s3_bucket, region=settings.aws_region)
@@ -6562,7 +6580,7 @@ teachme usage --subject "History ch. 3"
 ```
 
 Set `LLM_PROVIDER=fake EMBEDDINGS_PROVIDER=fake RERANKER_PROVIDER=noop` to run the whole pipeline
-without any API key. Tests: `TEST_DATABASE_URL=postgresql://teachme:teachme@localhost:5432/teachme_test pytest -q`.
+without any API key. Tests: `TEST_DATABASE_URL=postgresql://teachme:teachme@localhost:5433/teachme_test pytest -q`.
 ```
 
 - [ ] **Step 3: Lint and run everything**
