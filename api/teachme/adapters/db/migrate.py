@@ -50,21 +50,28 @@ def pending_versions(conn: psycopg.Connection) -> list[str]:
 def apply_migrations(conn: psycopg.Connection) -> list[str]:
     """Apply every pending migration in filename order, one transaction each.
 
-    An advisory lock serializes concurrent appliers so two processes racing to
-    migrate the same database don't both try to run the same migration.
+    A session-scoped advisory lock serializes concurrent appliers so two processes racing to
+    migrate the same database don't both try to run the same migration. Unlike a transaction-
+    scoped lock, it stays held across the commits the loop makes for each migration, and is
+    released explicitly once the whole run is done (or fails).
     """
-    conn.execute("SELECT pg_advisory_xact_lock(%s)", (_ADVISORY_LOCK_KEY,))
-    _ensure_migrations_table(conn)
-    conn.commit()
-
-    applied_now: list[str] = []
-    for version in pending_versions(conn):
-        sql = (MIGRATIONS_DIR / f"{version}.sql").read_text(encoding="utf-8")
-        conn.execute(sql)
-        conn.execute("INSERT INTO schema_migrations (version) VALUES (%s)", (version,))
+    conn.execute("SELECT pg_advisory_lock(%s)", (_ADVISORY_LOCK_KEY,))
+    try:
+        _ensure_migrations_table(conn)
         conn.commit()
-        applied_now.append(version)
-    return applied_now
+
+        applied_now: list[str] = []
+        for version in pending_versions(conn):
+            sql = (MIGRATIONS_DIR / f"{version}.sql").read_text(encoding="utf-8")
+            conn.execute(sql)
+            conn.execute("INSERT INTO schema_migrations (version) VALUES (%s)", (version,))
+            conn.commit()
+            applied_now.append(version)
+        return applied_now
+    finally:
+        conn.rollback()  # in case a migration failed mid-transaction; unlock needs a live conn
+        conn.execute("SELECT pg_advisory_unlock(%s)", (_ADVISORY_LOCK_KEY,))
+        conn.commit()
 
 
 def ensure_schema_current(conn: psycopg.Connection) -> None:

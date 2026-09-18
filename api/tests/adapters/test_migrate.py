@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from uuid import uuid4
 
 from teachme.adapters.db.engine import connect
@@ -10,6 +11,8 @@ from teachme.adapters.db.migrate import (
     ensure_schema_current,
     pending_versions,
 )
+
+_ADVISORY_LOCK_KEY = 7241965
 
 
 def test_migrations_apply_once_and_are_idempotent(migrated_database):
@@ -78,7 +81,7 @@ def test_applied_versions_and_pending_versions_are_read_only(migrated_database):
         conn.close()
 
 
-def test_apply_migrations_takes_an_advisory_lock(migrated_database):
+def test_apply_migrations_takes_and_releases_a_session_advisory_lock(migrated_database):
     conn = connect(migrated_database)
     executed: list[str] = []
     real_execute = conn.execute
@@ -90,6 +93,37 @@ def test_apply_migrations_takes_an_advisory_lock(migrated_database):
     conn.execute = spy_execute
     try:
         assert apply_migrations(conn) == []
-        assert any("pg_advisory_xact_lock" in query for query in executed)
+        assert any("pg_advisory_lock" in query and "xact" not in query for query in executed)
+        assert any("pg_advisory_unlock" in query for query in executed)
     finally:
         conn.close()
+
+
+def test_apply_migrations_blocks_while_another_connection_holds_the_lock(migrated_database):
+    """The lock must be session-scoped and cover the whole run: it is taken before the
+    migrations loop and only released once apply_migrations is completely done, so a second
+    connection racing to migrate blocks for as long as the first one holds it."""
+    holder = connect(migrated_database)
+    holder.execute("SELECT pg_advisory_lock(%s)", (_ADVISORY_LOCK_KEY,))
+    holder.commit()
+
+    conn = connect(migrated_database)
+    result: list[list[str]] = []
+
+    def run() -> None:
+        result.append(apply_migrations(conn))
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    try:
+        thread.join(timeout=1)
+        assert thread.is_alive(), "apply_migrations returned before the lock was released"
+    finally:
+        holder.execute("SELECT pg_advisory_unlock(%s)", (_ADVISORY_LOCK_KEY,))
+        holder.commit()
+        holder.close()
+
+    thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert result == [[]]
+    conn.close()
