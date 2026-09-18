@@ -60,6 +60,23 @@ def test_jobs_create_status_attempts(db):
     assert job["status"] == "failed" and job["attempts"] == 1 and job["error"] == "nope"
 
 
+def test_jobs_fail_stale_running_leaves_a_fresh_one_alone(db):
+    """An invocation that hit the function's duration limit leaves its row `running` forever;
+    the sweep is what turns that into a `failed` row a later delivery can claim again."""
+    repo = JobRepository(db)
+    stale = repo.create("ingest_source", {})
+    fresh = repo.create("ingest_source", {})
+    repo.set_status(stale, "running")
+    repo.set_status(fresh, "running")
+    db.execute("UPDATE jobs SET updated_at = now() - interval '20 minutes' WHERE id = %s", (stale,))
+
+    assert repo.fail_stale_running(300) == [stale]
+    assert repo.get(stale)["status"] == "failed"
+    assert repo.get(stale)["error"] == "invocation exceeded its duration"
+    assert repo.get(fresh)["status"] == "running"
+    assert repo.fail_stale_running(300) == []  # nothing left to sweep
+
+
 def test_usage_insert_and_summarize(db):
     subject, source = _source(db)
     repo = UsageRepository(db)

@@ -25,9 +25,11 @@ app = typer.Typer(no_args_is_help=True, help="teach-me operator commands")
 subject_app = typer.Typer(no_args_is_help=True, help="Manage subjects")
 source_app = typer.Typer(no_args_is_help=True, help="Manage sources")
 tutorial_app = typer.Typer(no_args_is_help=True, help="Inspect the generated tutorial")
+jobs_app = typer.Typer(no_args_is_help=True, help="Unstick background jobs")
 app.add_typer(subject_app, name="subject")
 app.add_typer(source_app, name="source")
 app.add_typer(tutorial_app, name="tutorial")
+app.add_typer(jobs_app, name="jobs")
 
 _OPERATOR_ERRORS = (
     NotFound,
@@ -354,6 +356,24 @@ def tutorial_show(
         typer.echo("\n## Key points")
         for point in rendered.key_points:
             typer.echo(f"- {point}")
+
+    _run(body)
+
+
+@jobs_app.command("sweep")
+def jobs_sweep() -> None:
+    """Fail jobs left `running` by an invocation that never came back, so they can be retried.
+
+    The same sweep every delivery of `/api/jobs/run` performs, for a deployment that is not
+    receiving deliveries any more - exactly the state a lost invocation leaves behind.
+    """
+
+    def body(c: Container) -> None:
+        stale = c.jobs.fail_stale_running(c.settings.job_stale_after_seconds)
+        c.conn.commit()
+        for job_id in stale:
+            typer.echo(f"failed: {job_id} (no invocation wrote it for {c.settings.job_stale_after_seconds}s)")
+        typer.echo(f"{len(stale)} stale running job(s)")
 
     _run(body)
 

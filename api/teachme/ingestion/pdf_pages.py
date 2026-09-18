@@ -34,17 +34,28 @@ def page_count(data: bytes) -> int:
     return len(_reader(data).pages)
 
 
-def split_pdf(data: bytes, pages_per_batch: int) -> list[PdfBatch]:
-    """Consecutive page ranges, each written as its own small PDF for one model call."""
+def pdf_batch(data: bytes, first_index: int, pages_per_batch: int) -> PdfBatch | None:
+    """The one batch that starts at `first_index`, written as its own small PDF for one model
+    call, or None when that index is past the last page. Resumable extraction asks for exactly
+    the batch it is missing rather than splitting the whole file to throw most of it away."""
     reader = _reader(data)
     total = len(reader.pages)
+    if first_index >= total:
+        return None
+    last = min(first_index + pages_per_batch, total) - 1
+    writer = PdfWriter()
+    for index in range(first_index, last + 1):
+        writer.add_page(reader.pages[index])
+    buffer = io.BytesIO()
+    writer.write(buffer)
+    return PdfBatch(first_index=first_index, last_index=last, data=buffer.getvalue())
+
+
+def split_pdf(data: bytes, pages_per_batch: int) -> list[PdfBatch]:
+    """Consecutive page ranges, each written as its own small PDF for one model call."""
     batches: list[PdfBatch] = []
-    for first in range(0, total, pages_per_batch):
-        last = min(first + pages_per_batch, total) - 1
-        writer = PdfWriter()
-        for index in range(first, last + 1):
-            writer.add_page(reader.pages[index])
-        buffer = io.BytesIO()
-        writer.write(buffer)
-        batches.append(PdfBatch(first_index=first, last_index=last, data=buffer.getvalue()))
+    first = 0
+    while (batch := pdf_batch(data, first, pages_per_batch)) is not None:
+        batches.append(batch)
+        first = batch.last_index + 1
     return batches

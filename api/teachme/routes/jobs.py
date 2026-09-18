@@ -70,6 +70,11 @@ def run_job(
     x_job_secret: Annotated[str | None, Header()] = None,
 ) -> RunJobResult:
     _authorize(scope, x_job_secret)
+    # Jobs whose invocation died mid-step are still `running` and nothing will ever write them
+    # again. Sweeping here, on the one endpoint a job runner is guaranteed to call, is what turns
+    # them back into rows a delivery can claim.
+    scope.jobs.fail_stale_running(scope.shared.settings.job_stale_after_seconds)
+    scope.conn.commit()
     job = scope.jobs.get(body.job_id)  # a job id nobody queued is a 404, not a 500
     claimed = scope.jobs.claim(body.job_id)
     scope.conn.commit()

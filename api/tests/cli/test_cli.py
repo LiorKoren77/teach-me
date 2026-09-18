@@ -8,6 +8,7 @@ from teachme.adapters.db.migrate import SchemaOutOfDate
 from teachme.container import Container
 from teachme.generation.teaching import TeachingOut
 from teachme.ports.llm import LLMError
+from teachme.repositories.jobs import JobRepository
 from teachme.settings import Settings
 from tests.helpers import make_pdf
 
@@ -268,3 +269,21 @@ def test_eval_reports_an_unknown_fixture_language_plainly(cli):
     app, *_ = cli
     result = runner.invoke(app, ["eval", "--language", "xx"])
     assert result.exit_code == 1 and result.output.startswith("error: no fixture")
+
+
+def test_jobs_sweep_fails_a_job_whose_invocation_died(cli, db):
+    """The operator's handle on the same sweep every delivery of /api/jobs/run runs."""
+    app, *_ = cli
+    jobs = JobRepository(db)
+    stale = jobs.create("ingest_source", {})
+    fresh = jobs.create("ingest_source", {})
+    jobs.set_status(stale, "running")
+    jobs.set_status(fresh, "running")
+    db.execute("UPDATE jobs SET updated_at = now() - interval '1 hour' WHERE id = %s", (stale,))
+    db.commit()
+
+    result = runner.invoke(app, ["jobs", "sweep"])
+    assert result.exit_code == 0, result.output
+    assert str(stale) in result.output and str(fresh) not in result.output
+    assert jobs.get(stale)["status"] == "failed"
+    assert jobs.get(fresh)["status"] == "running"

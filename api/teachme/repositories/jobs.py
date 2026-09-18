@@ -9,6 +9,10 @@ from psycopg.types.json import Jsonb
 
 from teachme.repositories.errors import JobNotFound
 
+# What a swept `running` row is marked with. The invocation that claimed it is gone - a function
+# does not get to write anything once its duration limit is reached - so nothing else will.
+STALE_RUNNING_ERROR = "invocation exceeded its duration"
+
 
 @dataclass(frozen=True)
 class ClaimedJob:
@@ -74,6 +78,19 @@ class JobRepository:
             (job_id,),
         ).fetchone()
         return None if row is None else ClaimedJob(**row)
+
+    def fail_stale_running(self, older_than_seconds: int) -> list[UUID]:
+        """Mark every `running` row untouched for longer than a function invocation may live as
+        failed, and say which. A serverless invocation that runs out of time writes nothing on
+        its way out, so without this its job stays `running` for ever and no delivery can claim
+        it; `failed` is claimable, so the sweep is also how such a job is retried."""
+        rows = self._conn.execute(
+            "UPDATE jobs SET status = 'failed', error = %s, updated_at = now()"
+            " WHERE status = 'running' AND updated_at < now() - make_interval(secs => %s)"
+            " RETURNING id",
+            (STALE_RUNNING_ERROR, older_than_seconds),
+        ).fetchall()
+        return [row["id"] for row in rows]
 
     def set_status(self, job_id: UUID, status: str, *, error: str | None = None) -> None:
         self._conn.execute(

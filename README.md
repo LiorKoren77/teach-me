@@ -224,15 +224,28 @@ selects:
   `https://{VERCEL_URL}`, so a preview deployment calls itself rather than production.
 - `sqs` enqueues the identical message for an AWS worker.
 
-`POST /api/jobs/run` does **one** unit of work per invocation: an `ingest_source` job advances the
-pipeline by a single step (extract, chunk or index) and, when more remains, enqueues a fresh job
-for the rest - so a 400-page book is many short invocations instead of one that outlives the
-function's duration limit. `generate_subject` and `generate_unit` are already job-sized. The job
-row is marked `running` (attempts incremented) before the step and `done` or `failed` after it.
+`POST /api/jobs/run` does **one** unit of work per invocation. For `ingest_source` that unit is
+one *read batch* during extraction - `PAGES_PER_READ_BATCH` pages, one vision call - and then one
+chunking step and one indexing step; when more remains the endpoint enqueues a fresh job for the
+rest. So an 8-page source read 3 at a time is 5 invocations, and a 400-page book is ~70 short ones
+rather than one that outlives the function's duration limit. `generate_subject` and
+`generate_unit` are already job-sized. Extraction resumes at the first page it has no row for, so
+a step that never came back costs at most the batch it was reading.
+
+The job row is claimed in a single statement (`UPDATE ... WHERE status IN ('queued','failed')`),
+which both increments `attempts` and makes the delivery exclusive: a redelivery of a job that is
+already `running` or `done` answers `200 {"status": "skipped"}` with no `next_job_id`, so it is
+not retried and the work is not repeated. An invocation killed by the duration limit writes
+nothing on its way out, so every delivery first sweeps rows left `running` for longer than
+`JOB_STALE_AFTER_SECONDS` (default 300) and marks them `failed`, which is also what makes them
+claimable again; `teachme jobs sweep` runs the same sweep by hand.
 
 `vercel.json` sets `maxDuration: 300` on `api/index.py`. **That ceiling depends on the account
 plan** - 300 s needs Pro or above; on Hobby the deploy is rejected or the value is clamped, so
-lower it to what the plan allows (each step is sized to fit comfortably either way).
+lower it to what the plan allows. Sizing is honest about what has to fit: one invocation holds
+one read batch, so `PAGES_PER_READ_BATCH` x the per-page read latency of `MODEL_READ_PAGES` must
+fit `maxDuration` (and `JOB_STALE_AFTER_SECONDS` should match it). Lower `PAGES_PER_READ_BATCH`
+on a slower model or a tighter plan.
 
 ### Error statuses
 

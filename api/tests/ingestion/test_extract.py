@@ -5,7 +5,7 @@ import pytest
 from teachme.adapters.llm.fake import FakeLLM
 from teachme.ingestion.detect_language import DetectedLanguage, detect_language
 from teachme.ingestion.errors import TooManyPages, UnsupportedMediaType
-from teachme.ingestion.extract import extract
+from teachme.ingestion.extract import extract, extract_batch
 from teachme.ingestion.read_pages import ReadPage, ReadPagesOutput
 from teachme.settings import Settings
 from tests.helpers import make_pdf
@@ -32,6 +32,44 @@ def test_pdf_is_read_in_batches():
     )
     assert [p.page_index for p in result.pages] == list(range(7))
     assert result.vision_pages == 7 and len(llm.calls) == 3
+
+
+def test_a_batch_is_read_from_where_extraction_stopped():
+    """What makes extraction resumable: the caller names the first page it is still missing and
+    gets that one batch back, so a job that died half way re-reads nothing it already has."""
+    llm = FakeLLM({ReadPagesOutput: _responder})
+    result = extract_batch(
+        llm,
+        _settings(pages_per_read_batch=3),
+        make_pdf(7),
+        "application/pdf",
+        language_hint=None,
+        first_index=3,
+    )
+    assert [p.page_index for p in result.pages] == [3, 4, 5]
+    assert result.total_pages == 7 and result.vision_pages == 7 and len(llm.calls) == 1
+
+
+def test_a_source_with_every_page_already_read_costs_no_model_call():
+    """The last batch leaves nothing behind, but a caller that failed after persisting it still
+    asks again; it gets the page count it needs to know it is done, and no vision call."""
+    llm = FakeLLM({ReadPagesOutput: _responder})
+    result = extract_batch(
+        llm,
+        _settings(pages_per_read_batch=3),
+        make_pdf(7),
+        "application/pdf",
+        language_hint=None,
+        first_index=7,
+    )
+    assert result.pages == [] and result.figures == [] and result.total_pages == 7
+    assert llm.calls == []
+
+
+def test_a_text_file_is_one_batch_and_one_page():
+    llm = FakeLLM({})
+    result = extract_batch(llm, _settings(), b"Body", "text/markdown", language_hint=None, first_index=0)
+    assert result.total_pages == 1 and result.vision_pages == 0 and len(result.pages) == 1
 
 
 def test_text_file_needs_no_model():

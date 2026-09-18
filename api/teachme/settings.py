@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     max_upload_bytes: int = 50 * 1024 * 1024
     pages_per_read_batch: int = 6
     pages_per_chunk_batch: int = 6
+    # How long a job may sit `running` before the sweep calls its invocation dead and marks it
+    # failed, so a later delivery can claim and retry it. A function that hits its duration limit
+    # writes nothing on its way out, so nothing else would ever move that row. Keep this at the
+    # function's own limit (vercel.json maxDuration): a job still inside it is not stale.
+    job_stale_after_seconds: int = 300
     max_answer_chars: int = 1500
     max_answers_per_minute: int = 20
     max_rejections_per_question: int = 2

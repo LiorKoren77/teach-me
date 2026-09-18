@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
+from psycopg.pq import TransactionStatus
 
 from teachme.adapters.chunk_search.pgvector import PgVectorChunkSearch
 from teachme.adapters.embeddings.fake import FakeEmbedder
@@ -14,6 +17,7 @@ from teachme.ingestion.detect_language import DetectedLanguage
 from teachme.ingestion.errors import SubjectLocked
 from teachme.ingestion.fake_responders import default_responders
 from teachme.ingestion.pipeline import IngestionPipeline, PipelineDeps
+from teachme.ingestion.read_pages import ReadPagesOutput
 from teachme.repositories.figures import FigureRepository
 from teachme.repositories.pages import PageRepository
 from teachme.repositories.sources import SourceRepository
@@ -115,7 +119,10 @@ def test_failure_records_resume_point_and_rerun_skips_extraction(env):
     assert read_calls_after == read_calls_before  # pages were reused, not re-read
 
 
-def test_extraction_failure_rolls_back_partial_writes_before_marking_failed(env):
+def test_a_failure_after_the_last_batch_keeps_the_pages_and_retries_only_what_failed(env):
+    """Language detection runs once every page is read, in a transaction of its own. Failing it
+    rolls back what it wrote and nothing else: the read batches are already committed, so the
+    retry pays for the language call again and for no vision call at all."""
     deps, subject, source, fake_llm = env
 
     def boom(request):
@@ -128,11 +135,13 @@ def test_extraction_failure_rolls_back_partial_writes_before_marking_failed(env)
 
     failed = deps.sources.get(source.id)
     assert failed.status == SourceStatus.FAILED and failed.resume_status == SourceStatus.EXTRACTING
-    assert deps.pages.list(source.id) == []
+    assert len(deps.pages.list(source.id)) == 5 and failed.page_count is None
+    reads_before = sum(1 for r in fake_llm.calls if r.purpose == "ingest.read_pages")
 
     fake_llm.set_responder(DetectedLanguage, default_responders()[DetectedLanguage])
     result = pipeline.ingest_source(source.id)
-    assert result.status == SourceStatus.READY
+    assert result.status == SourceStatus.READY and result.page_count == 5
+    assert sum(1 for r in fake_llm.calls if r.purpose == "ingest.read_pages") == reads_before
 
 
 def test_published_subject_is_locked(env):
@@ -214,12 +223,14 @@ def test_resume_from_indexing_rebuilds_chunks_when_the_bundle_lost_them(env):
 
 
 def test_run_next_step_performs_one_step_per_call(env):
+    """Five pages read two at a time: three extraction steps, then chunking, then indexing."""
     deps, subject, source, _ = env
     pipeline = IngestionPipeline(deps)
 
-    assert pipeline.run_next_step(source.id) is True
+    for read in (2, 4, 5):
+        assert pipeline.run_next_step(source.id) is True
+        assert len(deps.pages.list(source.id)) == read
     assert deps.sources.get(source.id).status == SourceStatus.CHUNKING
-    assert len(deps.pages.list(source.id)) == 5
 
     assert pipeline.run_next_step(source.id) is True
     assert deps.sources.get(source.id).status == SourceStatus.INDEXING
@@ -242,7 +253,8 @@ def test_run_next_step_marks_the_failed_step_and_the_next_call_resumes_it(env):
 
     fake_llm.set_responder(ChunksOut, flaky)
     pipeline = IngestionPipeline(deps)
-    assert pipeline.run_next_step(source.id) is True  # extraction
+    while deps.sources.get(source.id).status != SourceStatus.CHUNKING:
+        assert pipeline.run_next_step(source.id) is True  # extraction, one read batch at a time
     with pytest.raises(RuntimeError, match="upstream hiccup"):
         pipeline.run_next_step(source.id)
 
@@ -262,3 +274,89 @@ def test_run_next_step_refuses_a_published_subject(env):
     deps.conn.commit()
     with pytest.raises(SubjectLocked):
         IngestionPipeline(deps).run_next_step(source.id)
+
+
+def _eight_pages(deps, subject, *, per_batch: int):
+    """A second source of the same subject, read three pages at a time."""
+    deps = replace(deps, settings=deps.settings.model_copy(update={"pages_per_read_batch": per_batch}))
+    pdf = make_pdf(8)
+    deps.files.put("sources/x/ch2.pdf", pdf, "application/pdf")
+    source = deps.sources.create(subject.id, "ch2.pdf", "application/pdf", "sources/x/ch2.pdf", len(pdf))
+    deps.conn.commit()
+    return deps, source
+
+
+def test_extraction_advances_one_read_batch_per_call(env):
+    """A step is one read batch, not the whole extraction phase: 400 pages would otherwise be
+    ~67 sequential vision calls inside a single invocation, which no duration limit survives."""
+    deps, subject, _, fake_llm = env
+    deps, source = _eight_pages(deps, subject, per_batch=3)
+    pipeline = IngestionPipeline(deps)
+
+    statuses = []
+    calls = 1
+    while pipeline.run_next_step(source.id):
+        # every step is durable on its own: the next one may run in another invocation
+        assert deps.conn.info.transaction_status == TransactionStatus.IDLE
+        statuses.append(deps.sources.get(source.id).status)
+        calls += 1
+
+    assert calls == 5  # three read batches, then chunking, then indexing
+    assert statuses == [
+        SourceStatus.EXTRACTING,
+        SourceStatus.EXTRACTING,
+        SourceStatus.CHUNKING,
+        SourceStatus.INDEXING,
+    ]
+    assert sum(1 for r in fake_llm.calls if r.purpose == "ingest.read_pages") == 3
+    ready = deps.sources.get(source.id)
+    assert ready.status == SourceStatus.READY and ready.page_count == 8
+    assert ready.detected_language == "en" and ready.vision_pages == 8
+    assert [p.page_index for p in deps.pages.list(source.id)] == list(range(8))
+
+
+def test_a_failed_read_batch_resumes_without_re_reading_the_pages_before_it(env):
+    deps, subject, _, fake_llm = env
+    deps, source = _eight_pages(deps, subject, per_batch=3)
+    good = default_responders()[ReadPagesOutput]
+    calls = {"n": 0}
+
+    def flaky(request):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("vision timeout")
+        return good(request)
+
+    fake_llm.set_responder(ReadPagesOutput, flaky)
+    pipeline = IngestionPipeline(deps)
+    assert pipeline.run_next_step(source.id) is True  # first batch
+    assert len(deps.pages.list(source.id)) == 3
+    with pytest.raises(RuntimeError, match="vision timeout"):
+        pipeline.run_next_step(source.id)
+
+    failed = deps.sources.get(source.id)
+    assert failed.status == SourceStatus.FAILED and failed.resume_status == SourceStatus.EXTRACTING
+    assert len(deps.pages.list(source.id)) == 3  # the batch that landed is not undone
+
+    assert pipeline.ingest_source(source.id).status == SourceStatus.READY
+    assert [p.page_index for p in deps.pages.list(source.id)] == list(range(8))
+    # four reads: the three batches plus the one that failed - never the first batch twice
+    assert sum(1 for r in fake_llm.calls if r.purpose == "ingest.read_pages") == 4
+
+
+def test_the_bundle_page_files_mirror_the_pages_batch_by_batch(env):
+    deps, subject, _, _ = env
+    deps, source = _eight_pages(deps, subject, per_batch=3)
+    reader = BundleReader(
+        deps.bundle_stores[0],
+        f"{bundle_slug('Geo', subject.id)}/{bundle_slug('ch2.pdf', source.id)}",
+    )
+    pipeline = IngestionPipeline(deps)
+
+    pipeline.run_next_step(source.id)
+    assert [p.page_index for p in reader.pages()] == [0, 1, 2]
+    pipeline.run_next_step(source.id)
+    assert [p.page_index for p in reader.pages()] == [0, 1, 2, 3, 4, 5]
+
+    assert pipeline.ingest_source(source.id).status == SourceStatus.READY
+    assert len(reader.pages()) == 8 and reader.meta().page_count == 8

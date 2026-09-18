@@ -12,7 +12,7 @@ from teachme.ingestion.bundle import BundleReader, BundleWriter, SourceMeta, bun
 from teachme.ingestion.contextualize import contextualize
 from teachme.ingestion.detect_language import detect_language
 from teachme.ingestion.errors import SubjectLocked
-from teachme.ingestion.extract import extract
+from teachme.ingestion.extract import extract_batch
 from teachme.ingestion.index import index_chunks
 from teachme.ports.chunk_search import ChunkSearch
 from teachme.ports.embeddings import Embedder
@@ -32,7 +32,8 @@ INGEST_SOURCE = "ingest_source"
 
 # What a finished step hands the source on to. Each step sets its own status when it starts, and
 # nothing else; the transition out of it belongs to whoever drives the sequence, so no step has to
-# know - or claim - the name of the one that follows it.
+# know - or claim - the name of the one that follows it. Extraction stays in EXTRACTING until
+# every page is read, because one step is one read batch rather than the whole phase.
 NEXT_STEP = {
     SourceStatus.EXTRACTING: SourceStatus.CHUNKING,
     SourceStatus.CHUNKING: SourceStatus.INDEXING,
@@ -58,8 +59,10 @@ class IngestionPipeline:
     """uploaded -> extracting -> chunking -> indexing -> ready, resumable from the recorded status.
 
     Each step commits when its outputs are persisted. On failure the source is marked FAILED with
-    resume_status = the step that failed, and re-running continues from there. Chunks are recovered
-    from the bundle when resuming from INDEXING, so no model call is repeated."""
+    resume_status = the step that failed, and re-running continues from there. Extraction resumes
+    finer than that - from the first page it has no row for, so the read batches that landed are
+    never paid for twice - and chunks are recovered from the bundle when resuming from INDEXING,
+    so no model call is repeated."""
 
     def __init__(self, deps: PipelineDeps) -> None:
         self.d = deps
@@ -71,10 +74,15 @@ class IngestionPipeline:
         return self.d.sources.get(source_id)
 
     def run_next_step(self, source_id: UUID) -> bool:
-        """Exactly one step - extract, chunk or index - starting from the source's own resume
-        point and committed before returning. True means a step is still outstanding, so a runner
-        that gets one function invocation per step re-enqueues itself; False means the source
-        reached READY.
+        """Exactly one step - one read batch, chunking or indexing - starting from the source's
+        own resume point and committed before returning. True means a step is still outstanding,
+        so a runner that gets one function invocation per step re-enqueues itself; False means
+        the source reached READY.
+
+        Extraction is the step that has to be split: reading a 400-page book is one model call
+        per PAGES_PER_READ_BATCH pages, and doing them all in one invocation is what a duration
+        limit kills. So a step reads one batch, persists it and leaves the source in EXTRACTING;
+        the next call reads the batch after it.
 
         Failure is handled as it is for a whole run: the transaction is rolled back and the source
         marked FAILED with the step that failed as its resume_status, so the next call picks up
@@ -89,11 +97,15 @@ class IngestionPipeline:
         bundle = BundleWriter(self.d.bundle_stores, bundle_slug(subject.name, subject.id))
         source_slug = bundle_slug(source.filename, source.id)
         step = self._resume_point(source)
+        extracted_everything = True
         with usage_context(subject_id=subject.id, source_id=source.id):
             try:
                 if step in (SourceStatus.UPLOADED, SourceStatus.EXTRACTING):
+                    # UPLOADED means read the file from its first page: an explicit re-ingest
+                    # must not resume against the pages of the run before it.
+                    restart = step == SourceStatus.UPLOADED
                     step = SourceStatus.EXTRACTING
-                    self._extract(source, subject, bundle, source_slug)
+                    extracted_everything = self._extract(source, bundle, source_slug, restart=restart)
                 elif step == SourceStatus.CHUNKING:
                     self._chunk(source, subject, bundle, source_slug)
                 else:
@@ -109,6 +121,8 @@ class IngestionPipeline:
                 raise
         if step == SourceStatus.INDEXING:
             return False  # _index recorded READY itself; there is no next step to hand over to
+        if not extracted_everything:
+            return True  # more batches to read; the source stays where _extract left it
         self.d.sources.set_status(source.id, NEXT_STEP[step])
         self.d.conn.commit()
         return True
@@ -121,30 +135,61 @@ class IngestionPipeline:
             return SourceStatus.UPLOADED  # explicit re-ingest starts over
         return source.status
 
-    def _extract(self, source: Source, subject: Subject, bundle: BundleWriter, source_slug: str) -> None:
-        self.d.sources.set_status(source.id, SourceStatus.EXTRACTING)
-        self.d.conn.commit()
-        data = self.d.files.get(source.file_key)
-        extraction = extract(self.d.llm, self.d.settings, data, source.media_type, language_hint=None)
+    def _extract(self, source: Source, bundle: BundleWriter, source_slug: str, *, restart: bool) -> bool:
+        """One read batch, persisted and committed. Returns whether the source now has every
+        page, which is what tells the caller extraction is over.
 
-        self.d.pages.replace(source.id, extraction.pages)
-        self.d.figures.replace(source.id, extraction.figures)
-        # A re-ingest replaces the pages, so chunks from the previous run no longer match them.
-        # Drop them here, in the same transaction, rather than leave them searchable until the
-        # new chunks are indexed (or forever, if this run fails).
-        self.d.search.delete_by_source(source.id)
-        language = detect_language(self.d.llm, self.d.settings.model_detect_language, extraction.pages)
+        The batch read is the one starting at the first page with no row, so a step that never
+        came back costs at most the batch it was reading. The bundle's page files mirror those
+        rows, and the language and meta.json - which describe the whole source - are written
+        once, when the last batch has landed."""
+        self.d.sources.set_status(source.id, SourceStatus.EXTRACTING)
+        if restart:
+            # A re-ingest reads the file again from page 0, so the previous run's pages must not
+            # be resumed from - and its chunks no longer match anything. Dropping them here
+            # rather than when the new ones are indexed keeps nothing stale searchable, even if
+            # this run fails.
+            self.d.pages.replace(source.id, [])
+            self.d.figures.replace(source.id, [])
+            self.d.search.delete_by_source(source.id)
+        self.d.conn.commit()
+
+        first_index = self.d.pages.first_missing_index(source.id)
+        data = self.d.files.get(source.file_key)
+        batch = extract_batch(
+            self.d.llm,
+            self.d.settings,
+            data,
+            source.media_type,
+            language_hint=None,
+            first_index=first_index,
+        )
+        if batch.pages:
+            self.d.pages.append(source.id, batch.pages)
+            self.d.figures.append(source.id, batch.figures)
+            bundle.write_pages(source_slug, batch.pages)
+            bundle.write_figures(source_slug, self.d.figures.list(source.id))
+            # Asked before the commit, so this step leaves no transaction of its own open: the
+            # next batch may well be read by a different invocation on a different connection.
+            complete = self.d.pages.first_missing_index(source.id) >= batch.total_pages
+            self.d.conn.commit()
+            if not complete:
+                return False
+        self._finish_extraction(source, bundle, source_slug, batch.vision_pages)
+        return True
+
+    def _finish_extraction(
+        self, source: Source, bundle: BundleWriter, source_slug: str, vision_pages: int
+    ) -> None:
+        """What is true of the source rather than of a batch: its language, its page count and
+        the meta.json a re-import reads. Committed on its own, after the last batch is already
+        durable, so a language call that fails costs the language call and nothing else."""
+        pages = self.d.pages.list(source.id)
+        language = detect_language(self.d.llm, self.d.settings.model_detect_language, pages)
         self.d.sources.set_extraction_result(
-            source.id,
-            page_count=len(extraction.pages),
-            vision_pages=extraction.vision_pages,
-            detected_language=language,
+            source.id, page_count=len(pages), vision_pages=vision_pages, detected_language=language
         )
-        bundle.write_meta(
-            source_slug, self._meta(source, len(extraction.pages), extraction.vision_pages, language)
-        )
-        bundle.write_pages(source_slug, extraction.pages)
-        bundle.write_figures(source_slug, extraction.figures)
+        bundle.write_meta(source_slug, self._meta(source, len(pages), vision_pages, language))
         self.d.conn.commit()
 
     def _chunk(self, source: Source, subject: Subject, bundle: BundleWriter, source_slug: str) -> list[Chunk]:

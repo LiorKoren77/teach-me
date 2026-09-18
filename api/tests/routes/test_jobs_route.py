@@ -155,10 +155,12 @@ def test_an_unknown_job_id_is_404_not_500(ingest_job):
 
 
 def test_each_call_runs_one_step_and_re_enqueues_the_rest(ingest_job):
+    """Four pages read three at a time: two extraction steps, then chunking, then indexing. One
+    read batch per invocation is the point - a whole extraction phase would not fit in one."""
     http, container, source, job_id, client = ingest_job
     statuses = []
     next_id = job_id
-    for _ in range(3):
+    for _ in range(4):
         response = run(http, next_id)
         assert response.status_code == 200, response.text
         body = response.json()
@@ -169,15 +171,32 @@ def test_each_call_runs_one_step_and_re_enqueues_the_rest(ingest_job):
             )
         next_id = body["next_job_id"]
 
-    # one step per invocation: extract, then chunk, then index - and no further job after the last
-    assert statuses == ["chunking", "indexing", "ready"]
+    assert statuses == ["extracting", "chunking", "indexing", "ready"]
     assert next_id is None
-    assert wait_for(lambda: len(client.calls) == 2)
+    assert wait_for(lambda: len(client.calls) == 3)
     url, kwargs = client.calls[0]
     assert url == "https://teach-me.test/api/jobs/run"
     assert kwargs["json"]["kind"] == "ingest_source"
     assert kwargs["json"]["payload"] == {"source_id": str(source.id)}
     assert kwargs["headers"] == {"x-job-secret": SECRET}
+
+
+def test_a_delivery_sweeps_jobs_whose_invocation_died(ingest_job):
+    """A function that hits its duration limit writes nothing on its way out, so its row stays
+    `running` for ever. Every delivery sweeps first, which both records the truth and makes the
+    row claimable again."""
+    http, container, source, job_id, _ = ingest_job
+    with container.pool.connection() as conn:
+        dead = JobRepository(conn).create("ingest_source", {"source_id": str(source.id)})
+        conn.execute(
+            "UPDATE jobs SET status = 'running', updated_at = now() - interval '1 hour' WHERE id = %s",
+            (dead,),
+        )
+    assert run(http, job_id).json()["status"] == "done"
+
+    with container.pool.connection() as conn:
+        row = conn.execute("SELECT status, error FROM jobs WHERE id = %s", (dead,)).fetchone()
+    assert row["status"] == "failed" and row["error"] == "invocation exceeded its duration"
 
 
 def test_an_unknown_kind_marks_the_job_failed(ingest_job):

@@ -14,6 +14,10 @@ class FigureRepository:
 
     def replace(self, source_id: UUID, figures: Sequence[Figure]) -> None:
         self._conn.execute("DELETE FROM source_figures WHERE source_id = %s", (source_id,))
+        self.append(source_id, figures)
+
+    def append(self, source_id: UUID, figures: Sequence[Figure]) -> None:
+        """The figures of one read batch, alongside the ones already recorded."""
         with self._conn.cursor() as cur:
             cur.executemany(
                 "INSERT INTO source_figures (source_id, page_index, ordinal, kind, caption, description)"
