@@ -151,6 +151,12 @@ class Container:
         # now live on a Scope. The guard keeps a half-built container from recursing forever.
         if name.startswith("_") or name in ("settings", "scope", "conn", "usage_conn", "pool"):
             raise AttributeError(name)
+        if "pool" in self.__dict__:
+            raise AttributeError(
+                f"{name!r} is not reachable on a container serving requests: a request takes its"
+                " own scope from the pool (`request_scope`), and falling through here would put"
+                " every request on the single CLI connection, in one shared transaction"
+            )
         return getattr(self.scope, name)
 
     @contextmanager

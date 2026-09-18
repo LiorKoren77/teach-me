@@ -117,6 +117,29 @@ persisted to completion before any events are sent, then replayed to the client:
   true when the model stopped at its token ceiling, and `round_no` is the failed round it
   reinforces.
 
+#### Buffered today, live-streamed later
+
+The stream is buffered, not live. `_reexplain_events` runs the whole thing - the Opus call, the
+insert and its commit, and the glossary rendering of the final text - before the response body
+starts, collecting the model's chunks in a list; only then are they replayed as `delta` events
+followed by `done`. The reason is error handling: while nothing has been sent, a refusal or a
+provider failure can still become a status code with our error body, whereas once the response
+has started it could only arrive as a broken stream.
+
+What that costs: the client gets no bytes at all until the Opus call has finished, so `delta`
+events carry no information the `done` event does not, and any intermediary with a
+time-to-first-byte timeout (a proxy, a CDN, a serverless platform's own limit) can cut the
+request off before the first event - which looks to the student like a re-explanation that never
+arrives, even though the row was committed and a retry serves it from the round's cache.
+
+The follow-up is to stream as the model produces it: the model call runs in a worker thread whose
+`on_delta` pushes onto a queue, the route's generator drains that queue and yields each chunk as a
+`delta` event, the row is committed after the model returns and before `done` is emitted, and a
+refusal or `LLMError` mid-stream rolls the transaction back and emits an `error` event instead of
+`done`. Retries stay free because the re-explanation is cached per round: a stream cut off after
+the commit is replayed from the stored row, and one cut off before it re-generates exactly once,
+the attempt row being locked for the duration.
+
 ### Stage 3 settings
 
 New settings from `api/teachme/settings.py` (env names as in `.env.example`):

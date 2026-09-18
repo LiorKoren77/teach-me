@@ -141,7 +141,7 @@ def test_reexplain_stream_and_errors(api):
     stats = container.pool.get_stats()
     assert stats.get("requests_waiting", 0) == 0 and stats["pool_size"] == stats["pool_available"]
     # and the row was committed before the stream ended, on another connection entirely
-    assert container.attempts.latest_reexplanation(UUID(attempt_id)) is not None
+    assert container.scope.attempts.latest_reexplanation(UUID(attempt_id)) is not None
 
     # a client that gives up in the middle of a stream releases the connection just the same
     with client.stream("GET", f"/api/attempts/{attempt_id}/reexplain") as second:

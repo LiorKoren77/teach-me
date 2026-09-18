@@ -35,7 +35,8 @@ def test_request_scope_uses_pooled_connection_and_usage_rows_are_durable(db, mak
         )
         scope.conn.commit()
     assert any(r["purpose"] == "scope.test" for r in c.usage_repo.summarize())
-    assert c.subjects.get_by_name("Scoped") is not None
+    # the pool exists now, so the container's own repositories are reached through its CLI scope
+    assert c.scope.subjects.get_by_name("Scoped") is not None
 
 
 def test_request_scope_rolls_back_on_error(db, make_container):
@@ -44,7 +45,7 @@ def test_request_scope_rolls_back_on_error(db, make_container):
         with c.request_scope() as scope:
             scope.subjects.create("Rolled", ["he"])
             raise RuntimeError("boom")
-    assert c.subjects.get_by_name("Rolled") is None
+    assert c.scope.subjects.get_by_name("Rolled") is None
 
 
 def test_every_exit_path_returns_the_connection_to_the_pool(db, make_container, migrated_database):

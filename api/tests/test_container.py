@@ -97,3 +97,15 @@ def test_usage_rows_survive_a_failed_pipeline_step(db, make_container):
     assert container.sources.get(source.id).status == SourceStatus.FAILED
     purposes = {row["purpose"] for row in container.usage_repo.summarize(subject_id=subject.id)}
     assert "ingest.read_pages" in purposes
+
+
+def test_the_cli_fall_through_closes_once_a_pool_exists(make_container):
+    """`container.attempts` is the CLI's convenience: it resolves on the container's single
+    connection. Once a pool has been opened - i.e. the app is serving requests - that fall-through
+    would quietly put a request on that one connection, so it raises instead."""
+    container = make_container()
+    assert container.attempts is container.scope.attempts
+    _ = container.pool
+    with pytest.raises(AttributeError, match="request_scope"):
+        _ = container.attempts
+    assert container.scope.attempts is not None  # the CLI scope itself still works
