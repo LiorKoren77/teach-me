@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from teachme.adapters.db.migrate import ensure_schema_current
 from teachme.auth.clerk import make_clerk_guard
 from teachme.container import Container
-from teachme.routes import admin, learning, pages, subjects
+from teachme.routes import admin, jobs, learning, pages, subjects
 from teachme.routes.errors import install_error_handlers
 
 
@@ -46,4 +46,5 @@ def create_app(container: Container | None = None) -> FastAPI:
     app.include_router(pages.router)
     app.include_router(learning.router)
     app.include_router(admin.router)
+    app.include_router(jobs.router)
     return app

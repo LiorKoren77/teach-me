@@ -4,6 +4,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from functools import cached_property
 
+import httpx
 import psycopg
 from psycopg_pool import ConnectionPool
 
@@ -107,6 +108,12 @@ class Container:
         return connect(self.settings.database_url, autocommit=True)
 
     @cached_property
+    def http_client(self) -> httpx.Client:
+        """Outgoing HTTP this process makes on its own behalf - today only the vercel_function
+        job runner calling this deployment back. One client, so connections are reused."""
+        return httpx.Client()
+
+    @cached_property
     def prices(self) -> PriceTable:
         return PriceTable()
 
@@ -188,7 +195,7 @@ class Container:
         self.conn.rollback()
 
     def close(self) -> None:
-        for name in ("conn", "usage_conn"):
+        for name in ("conn", "usage_conn", "http_client"):
             if name in self.__dict__:
                 self.__dict__[name].close()
         if "pool" in self.__dict__:

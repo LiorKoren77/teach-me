@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     embeddings_provider: Literal["voyage", "fake"] = "voyage"
     reranker_provider: Literal["voyage", "noop"] = "voyage"
     file_store: Literal["local", "vercel_blob", "s3"] = "local"
-    job_runner: Literal["inprocess", "sqs"] = "inprocess"
+    job_runner: Literal["inprocess", "sqs", "vercel_function"] = "inprocess"
 
     local_files_dir: Path = Path("data/files")
     digest_dir: Path = Path("digest")
@@ -31,6 +31,14 @@ class Settings(BaseSettings):
     aws_region: str = "eu-central-1"
     s3_bucket: str | None = None
     sqs_queue_url: str | None = None
+    # JOB_RUNNER=vercel_function: the function calls itself back at {self_base_url}/api/jobs/run,
+    # authenticating with this shared secret. Unset self_base_url means https://{VERCEL_URL},
+    # which Vercel sets per deployment, so a preview calls its own preview and not production.
+    job_runner_secret: SecretStr | None = None
+    self_base_url: str | None = None
+    # Set by Vercel on every deployment: that deployment's own host, without a scheme. Read here
+    # rather than from os.environ, because settings is the only place that touches the environment.
+    vercel_url: str | None = None
 
     model_read_pages: str = "claude-opus-5"
     model_detect_language: str = "claude-opus-5"
@@ -75,6 +83,13 @@ class Settings(BaseSettings):
     anthropic_api_key: SecretStr | None = None
     voyage_api_key: SecretStr | None = None
     blob_read_write_token: SecretStr | None = None
+
+    @property
+    def job_callback_base_url(self) -> str | None:
+        """Where the vercel_function runner posts a job back to this same deployment."""
+        if self.self_base_url:
+            return self.self_base_url.rstrip("/")
+        return f"https://{self.vercel_url}" if self.vercel_url else None
 
     def relevance_thresholds_for(self, language_code: str) -> RelevanceThresholds:
         """The override for this language, or the defaults."""

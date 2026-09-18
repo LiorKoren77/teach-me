@@ -27,6 +27,9 @@ from teachme.telemetry.usage import usage_context
 
 log = logging.getLogger(__name__)
 
+# The job kind a queued ingestion travels under.
+INGEST_SOURCE = "ingest_source"
+
 
 @dataclass
 class PipelineDeps:

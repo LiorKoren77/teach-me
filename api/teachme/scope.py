@@ -10,8 +10,8 @@ import psycopg
 
 from teachme.adapters.chunk_search.pgvector import PgVectorChunkSearch
 from teachme.adapters.job_runner.inprocess import InProcessJobRunner
-from teachme.ingestion.pipeline import IngestionPipeline, PipelineDeps
-from teachme.ports.job_runner import JobPayload, JobRunner
+from teachme.ingestion.pipeline import INGEST_SOURCE, IngestionPipeline, PipelineDeps
+from teachme.ports.job_runner import JobHandler, JobPayload, JobRunner
 from teachme.repositories.attempts import AttemptRepository
 from teachme.repositories.content import ContentRepository
 from teachme.repositories.figures import FigureRepository
@@ -145,11 +145,34 @@ class Scope:
         run_generate_unit(payload, service=self.tutorial_service)
 
     @cached_property
+    def job_handlers(self) -> dict[str, JobHandler]:
+        """Every kind this deployment knows how to run, for the in-process runner and for the
+        /api/jobs/run endpoint - which dispatches `ingest_source` one step at a time instead."""
+        return {
+            INGEST_SOURCE: self._ingest_job,
+            GENERATE_SUBJECT: self._generate_subject_job,
+            GENERATE_UNIT: self._generate_unit_job,
+        }
+
+    def mark_job_failed(self, job_id: UUID, error: str) -> None:
+        """Record a job as failed from outside the request that enqueued it. The vercel_function
+        runner calls this from its POST thread, by which time this request's pooled connection may
+        already be serving someone else, so a connection of its own is taken when there is a pool;
+        a CLI container has none and uses its single connection."""
+        pool = self.shared.__dict__.get("pool")
+        if pool is None:
+            self.jobs.set_status(job_id, "failed", error=error)
+            self.conn.commit()
+            return
+        with pool.connection() as conn:
+            JobRepository(conn).set_status(job_id, "failed", error=error)
+
+    @cached_property
     def job_runner(self) -> JobRunner:
         settings = self.shared.settings
-        if settings.job_runner == "sqs":
-            from teachme.container import ConfigurationError
+        from teachme.container import ConfigurationError
 
+        if settings.job_runner == "sqs":
             if not settings.sqs_queue_url:
                 raise ConfigurationError("JOB_RUNNER=sqs requires SQS_QUEUE_URL")
             from teachme.adapters.job_runner.sqs import SqsJobRunner
@@ -160,12 +183,27 @@ class Scope:
                 jobs=self.jobs,
                 commit=self.conn.commit,
             )
+        if settings.job_runner == "vercel_function":
+            from teachme.adapters.job_runner.vercel_function import VercelFunctionJobRunner
+
+            base_url = settings.job_callback_base_url
+            if not base_url:
+                raise ConfigurationError(
+                    "JOB_RUNNER=vercel_function requires SELF_BASE_URL (or VERCEL_URL, which "
+                    "Vercel sets on every deployment)"
+                )
+            if not settings.job_runner_secret:
+                raise ConfigurationError("JOB_RUNNER=vercel_function requires JOB_RUNNER_SECRET")
+            return VercelFunctionJobRunner(
+                base_url=base_url,
+                secret=settings.job_runner_secret.get_secret_value(),
+                jobs=self.jobs,
+                client=self.shared.http_client,
+                commit=self.conn.commit,
+                mark_failed=self.mark_job_failed,
+            )
         return InProcessJobRunner(
-            {
-                "ingest_source": self._ingest_job,
-                GENERATE_SUBJECT: self._generate_subject_job,
-                GENERATE_UNIT: self._generate_unit_job,
-            },
+            self.job_handlers,
             jobs=self.jobs,
             commit=self.conn.commit,
             rollback=self.conn.rollback,

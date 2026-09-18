@@ -178,6 +178,7 @@ without it every token is treated as a student, since a missing `role` claim fal
 | GET | `/api/admin/subjects` | admin | List every subject regardless of publication state. |
 | GET | `/api/admin/subjects/{subject_id}/sources` | admin | List a subject's ingested sources and their status. |
 | GET | `/api/admin/usage` | admin | Model/embedding usage and cost summary, optionally filtered by `subject_id`. |
+| POST | `/api/jobs/run` | the deployment itself | Runs one unit of a queued job. No Clerk session: the only credential is the `x-job-secret` header, compared against `JOB_RUNNER_SECRET` in constant time. See "Background jobs". |
 
 The `RenderedPart` a `/start` (or a learn route) returns carries `page_refs`: the global page
 indices of the pages whose figures the teaching text points at, written by the generator rather
@@ -185,6 +186,30 @@ than scraped out of the prose. They are exactly the indices `GET /api/subjects/{
 takes, so the client can show a page thumbnail next to the text without parsing it; the prose
 itself names pages by their printed number, which is not a corpus index.
 
+
+### Background jobs
+
+Ingestion and generation are queued as jobs (`jobs` table) and run by the runner `JOB_RUNNER`
+selects:
+
+- `inprocess` (default, and what the CLI and the tests use) runs the handler in the calling
+  thread, so `teachme ingest` blocks until the source is ready.
+- `vercel_function` is the serverless answer to having no worker: the request creates the job row,
+  commits it, and posts `{job_id, kind, payload}` to `{SELF_BASE_URL}/api/jobs/run` with the
+  `x-job-secret` header from a daemon thread it never waits on (a read timeout means delivered,
+  not failed - the receiving invocation is still working). `SELF_BASE_URL` unset means
+  `https://{VERCEL_URL}`, so a preview deployment calls itself rather than production.
+- `sqs` enqueues the identical message for an AWS worker.
+
+`POST /api/jobs/run` does **one** unit of work per invocation: an `ingest_source` job advances the
+pipeline by a single step (extract, chunk or index) and, when more remains, enqueues a fresh job
+for the rest - so a 400-page book is many short invocations instead of one that outlives the
+function's duration limit. `generate_subject` and `generate_unit` are already job-sized. The job
+row is marked `running` (attempts incremented) before the step and `done` or `failed` after it.
+
+`vercel.json` sets `maxDuration: 300` on `api/index.py`. **That ceiling depends on the account
+plan** - 300 s needs Pro or above; on Hobby the deploy is rejected or the value is clamped, so
+lower it to what the plan allows (each step is sized to fit comfortably either way).
 
 ### Error statuses
 
@@ -194,6 +219,7 @@ wins when one refusal subclasses another):
 | Status | Error | Covers |
 | --- | --- | --- |
 | 401 | *(`current_user`, not a domain error)* | No `Authorization` header, a scheme other than `Bearer`, a token that cannot be verified against the configured JWKS, or a verified token with no `sub` claim. The Clerk guard is built with `auto_error=False` precisely so this status - and this body - comes from us rather than the SDK's `403 Forbidden`. |
+| 400 | `UnknownJobKind` | A queued job names a kind this deployment cannot run - a job row left behind by an older version, or a queue shared with a deployment that knows kinds this one does not. The job row is marked `failed` before the status is returned. |
 | 404 | `NotFound` | The subject, source, attempt, question or other resource does not exist. |
 | 403 | `NotAllowed` | The caller does not own the attempt, the part is locked, the language is not one the subject teaches *and* this deployment enables (`ENABLED_LANGUAGES`), or (via `require_role`) the caller's role does not permit an admin route. |
 | 429 | `RateLimited` | A `NotAllowed` subclass: the caller submitted more answers/rejections than `MAX_ANSWERS_PER_MINUTE` allows in the last minute. |

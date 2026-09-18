@@ -7,6 +7,7 @@ from teachme.domain.assessment.scoring import UnmappedQuestion
 from teachme.domain.assessment.transitions import IllegalTransition
 from teachme.generation.errors import GenerationError
 from teachme.ingestion.errors import SubjectLocked
+from teachme.ports.job_runner import UnknownJobKind
 from teachme.repositories.errors import NotFound
 from teachme.routes.schemas import ErrorResponse
 from teachme.services.learning import LearningError, NotAllowed, RateLimited
@@ -14,6 +15,7 @@ from teachme.services.learning import LearningError, NotAllowed, RateLimited
 # Starlette looks a handler up along the exception's MRO, so the most specific class registered
 # wins: RateLimited before NotAllowed, NotAllowed before LearningError.
 STATUS_BY_ERROR: tuple[tuple[int, type[Exception]], ...] = (
+    (400, UnknownJobKind),
     (404, NotFound),
     (403, NotAllowed),
     (429, RateLimited),
