@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from teachme.domain.relevance.scorer import RelevanceThresholds
 from teachme.settings import Settings
 
 
@@ -53,4 +54,21 @@ def test_rejects_unknown_provider(monkeypatch):
 def test_rejects_unknown_language(monkeypatch):
     monkeypatch.setenv("ENABLED_LANGUAGES", '["he","xx"]')
     with pytest.raises(ValidationError):
+        Settings(_env_file=None)
+
+
+def test_relevance_thresholds_fall_back_to_the_defaults_per_language(monkeypatch):
+    monkeypatch.setenv("RELEVANCE_THRESHOLDS", '{"he":{"high":0.4,"low":0.1}}')
+    settings = Settings(_env_file=None)
+    assert settings.relevance_thresholds_for("en").high == 0.5  # the default
+    assert settings.relevance_thresholds_for("he") == RelevanceThresholds(high=0.4, low=0.1)
+
+
+def test_rejects_relevance_thresholds_out_of_order(monkeypatch):
+    monkeypatch.setenv("RELEVANCE_LOW", "0.9")
+    with pytest.raises(ValidationError, match="low <= high"):
+        Settings(_env_file=None)
+    monkeypatch.delenv("RELEVANCE_LOW")
+    monkeypatch.setenv("RELEVANCE_THRESHOLDS", '{"he":{"high":0.2,"low":0.5}}')
+    with pytest.raises(ValidationError, match="'he'"):
         Settings(_env_file=None)

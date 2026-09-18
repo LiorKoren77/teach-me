@@ -3,10 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import SecretStr, field_validator
+from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from teachme.domain.languages import LANGUAGES
+from teachme.domain.relevance.scorer import RelevanceThresholds
 
 
 class Settings(BaseSettings):
@@ -51,10 +52,37 @@ class Settings(BaseSettings):
     max_rejections_per_question: int = 2
     reinforce_sections_cap: int = 3
 
+    # Relevance bands: at or above `high` an answer skips the relevance check, below `low` it is
+    # LOW. Both go to the check, so these only move where the cheap model call is spent.
+    relevance_high: float = 0.5
+    relevance_low: float = 0.15
+    relevance_thresholds: dict[str, RelevanceThresholds] = {}
+    """Per-language overrides for the two thresholds above, because the lexical score is not
+    equally generous in every language: RELEVANCE_THRESHOLDS={"he": {"high": 0.4, "low": 0.1}}."""
+
     # Credentials, passed explicitly to adapters instead of adapters reading os.environ themselves.
     anthropic_api_key: SecretStr | None = None
     voyage_api_key: SecretStr | None = None
     blob_read_write_token: SecretStr | None = None
+
+    def relevance_thresholds_for(self, language_code: str) -> RelevanceThresholds:
+        """The override for this language, or the defaults."""
+        return self.relevance_thresholds.get(language_code) or RelevanceThresholds(
+            high=self.relevance_high, low=self.relevance_low
+        )
+
+    @model_validator(mode="after")
+    def _ordered_relevance_thresholds(self) -> Settings:
+        """A low above the high would leave the UNCERTAIN band empty and silently reclassify
+        every answer, so the ordering is checked rather than trusted."""
+        configured = [("default", self.relevance_thresholds_for("")), *self.relevance_thresholds.items()]
+        for name, thresholds in configured:
+            if not 0.0 <= thresholds.low <= thresholds.high <= 1.0:
+                raise ValueError(
+                    f"relevance thresholds for {name!r} must satisfy 0 <= low <= high <= 1, "
+                    f"got low={thresholds.low}, high={thresholds.high}"
+                )
+        return self
 
     @field_validator("enabled_languages")
     @classmethod

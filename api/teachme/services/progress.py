@@ -6,6 +6,7 @@ import psycopg
 from pydantic import BaseModel
 
 from teachme.domain.models import PartProgress, PartStatus, Subject
+from teachme.generation.errors import SubjectNotReady
 from teachme.repositories.outlines import OutlineRepository
 from teachme.repositories.progress import ProgressRepository
 
@@ -32,9 +33,14 @@ class ProgressService:
 
     def parts_with_progress(self, user_id: str, subject: Subject) -> list[PartView]:
         """Ensures rows exist, then derives locks: a part is locked until the previous one is passed."""
-        assert subject.current_outline_version is not None
+        if subject.current_outline_version is None:
+            raise SubjectNotReady(f"subject {subject.name!r} has no published outline version")
         outline = self._outlines.get_version(subject.id, subject.current_outline_version)
-        assert outline is not None
+        if outline is None:
+            raise SubjectNotReady(
+                f"subject {subject.name!r} points at outline version "
+                f"{subject.current_outline_version}, which does not exist"
+            )
         parts = self._outlines.parts(outline.id)
         rows = {
             r.part_id: r
@@ -61,8 +67,12 @@ class ProgressService:
             previous_passed = row.status == PartStatus.PASSED
         return views
 
-    def reset_for_new_version(self, subject: Subject, version: int) -> int:
-        """A newly published outline version has new part ids: old progress cannot be carried over."""
+    def reset_for_new_version(self, subject: Subject, _version: int) -> int:
+        """A newly published outline version has new part ids: old progress cannot be carried over.
+
+        The version is not read: every row of the subject goes, whichever version it belonged to.
+        Republishing the same version must not reach here at all, and what prevents it is the
+        caller's `changed` gate, not a comparison made here."""
         deleted = self._progress.reset_subject(subject.id)
         self._conn.commit()
         return deleted

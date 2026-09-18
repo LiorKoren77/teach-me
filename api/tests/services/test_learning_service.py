@@ -5,6 +5,7 @@ from uuid import uuid4
 import pytest
 
 from teachme.container import Container
+from teachme.domain.assessment.transitions import IllegalTransition
 from teachme.domain.models import (
     AttemptStatus,
     Grade,
@@ -14,6 +15,8 @@ from teachme.domain.models import (
     RelevanceBand,
     Route,
 )
+from teachme.domain.relevance.scorer import RelevanceThresholds
+from teachme.generation.errors import SubjectNotReady
 from teachme.grading.grader import GradeOut
 from teachme.grading.relevance_check import RelevanceVerdict
 from teachme.repositories.attempts import AttemptRepository
@@ -430,3 +433,58 @@ def test_a_final_oversized_answer_is_not_persisted(env):
     assert result.grade == Grade.JUNK  # the last rejection scores the question wrong
     stored = c.attempts.get_question(question.attempt_question_id)
     assert stored.answer_text is None  # an answer rejected for its size is never kept
+
+
+def test_a_round_outcome_is_guarded_by_the_status_the_part_is_actually_in(env):
+    """The outcome of a round is asserted against the status the part holds now, not against a
+    hardcoded QUIZZING: a part moved elsewhere while the round was open must not be passed."""
+    c, subject, fake = env
+    fake.set_responder(GradeOut, _grade("correct"))
+    session = c.learning_service.start_part(USER, subject, position=0, language="en")
+    question = c.learning_service.begin_round(USER, session.attempt_id)
+    part_id = c.attempts.get(session.attempt_id).part_id
+    c.progress.update(c.progress.get(USER, part_id).id, status=PartStatus.LEARNING)
+    c.conn.commit()
+
+    with pytest.raises(IllegalTransition):
+        _answer_all(c, session.attempt_id, question)
+    assert c.progress.get(USER, part_id).status == PartStatus.LEARNING
+
+
+def test_starting_a_part_reports_an_illegal_transition_as_a_learning_error(env):
+    """The API layer sees one exception family: an illegal transition on the way into a part is
+    a LearningError, not a domain IllegalTransition leaking through."""
+    c, subject, fake = env
+    session = c.learning_service.start_part(USER, subject, position=0, language="en")
+    c.learning_service.begin_round(USER, session.attempt_id)  # the part is QUIZZING now
+    c.attempts.finish(session.attempt_id, AttemptStatus.FAILED)  # ... with no active attempt left
+    c.conn.commit()
+    with pytest.raises(LearningError, match="quizzing"):
+        c.learning_service.start_part(USER, subject, position=0, language="en")
+
+
+def test_progress_of_an_unpublished_subject_is_refused_not_asserted(env):
+    c, _, _ = env
+    draft = c.subject_service.get_or_create("Draft", ["en"])
+    with pytest.raises(SubjectNotReady):
+        c.progress_service.parts_with_progress(USER, draft)
+
+
+def test_relevance_thresholds_are_configurable_per_language(env):
+    """With the HIGH threshold lowered for the answer's language, the same answer lands in HIGH
+    and skips the relevance check instead of paying for it."""
+    c, subject, fake = env
+    fake.set_responder(GradeOut, _grade("correct"))
+    c.settings.relevance_thresholds = {"en": RelevanceThresholds(high=0.0, low=0.0)}
+    session = c.learning_service.start_part(USER, subject, position=0, language="en")
+    question = c.learning_service.begin_round(USER, session.attempt_id)
+    result = c.learning_service.submit_answer(
+        USER,
+        session.attempt_id,
+        question.attempt_question_id,
+        answer_text="The ozone layer of the atmosphere absorbs radiation, protecting the biosphere.",
+    )
+    assert result.accepted
+    stored = c.attempts.get_question(question.attempt_question_id)
+    assert stored.relevance_band == RelevanceBand.HIGH and stored.route == Route.GRADER
+    assert not [r for r in fake.calls if r.purpose == "learn.relevance_check"]
