@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from teachme.container import Container
@@ -145,16 +147,55 @@ def test_a_failed_part_is_reported_and_leaves_nothing_behind(container):
     assert report.failures
 
     outline = container.outlines.latest(subject.id)
-    for part in container.outlines.parts(outline.id):
+    parts = container.outlines.parts(outline.id)
+    for part in parts:
         for language in ("he", "en"):
             content = container.content.part(part.id, language)
             assert content is not None and content.status == ContentStatus.FAILED
             assert container.content.sections(part.id, language) == []
+            assert container.questions.for_part(part.id, language) == []
 
     slug = bundle_slug(subject.name, subject.id)
-    keys = container.bundle_stores[0].list_keys(f"{slug}/")
-    assert [key for key in keys if "/parts/" in key] == []
+    store = container.bundle_stores[0]
+    part_keys = [key for key in store.list_keys(f"{slug}/") if "/parts/" in key]
+    assert len(part_keys) == len(parts) * 2  # a failed stub per part per language, no ready content
+    for key in part_keys:
+        stub = store.get(key).decode()
+        assert "status=failed" in stub and "#" not in stub
     assert container.tutorial_service.status(subject).publishable is False
+
+
+def test_failed_part_regeneration_clears_the_previous_attempts_content(container):
+    subject = _ingested_subject(container, pages=9)  # several parts, so other parts stay untouched
+    container.tutorial_service.generate(subject)
+    outline = container.outlines.latest(subject.id)
+    part = next(p for p in container.outlines.parts(outline.id) if p.position == 0)
+    before_questions = container.tutorial_service.status(subject).languages
+    he_before = next(lang for lang in before_questions if lang.language == "he").questions
+
+    def boom(request):
+        raise LLMError("teaching service down")
+
+    container.llm.inner.set_responder(TeachingOut, boom)
+    report = container.tutorial_service.generate(subject, languages=["he"], parts=[0])
+    assert report.failures and report.results[0].content_status == ContentStatus.FAILED
+
+    content = container.content.part(part.id, "he")
+    assert content is not None and content.status == ContentStatus.FAILED
+    assert container.content.sections(part.id, "he") == []
+    assert container.questions.for_part(part.id, "he") == []
+
+    status = container.tutorial_service.status(subject)
+    he_after = next(lang for lang in status.languages if lang.language == "he")
+    assert he_after.questions < he_before
+
+    slug = bundle_slug(subject.name, subject.id)
+    store = container.bundle_stores[0]
+    stub = store.get(f"{slug}/v1/parts/01.he.md").decode()
+    assert "status=failed" in stub and "teaching service down" in stub and "#" not in stub
+
+    jsonl = store.get(f"{slug}/v1/questions.he.jsonl").decode()
+    assert all(json.loads(line)["part_position"] != 0 for line in jsonl.splitlines() if line)
 
 
 def test_a_glossary_failure_leaves_no_new_outline_version(container):

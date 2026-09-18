@@ -59,6 +59,15 @@ class ContentRepository:
                 [(c.section_id, c.language, c.title, c.summary) for c in contents],
             )
 
+    def delete_sections(self, part_id: UUID, language: str) -> None:
+        """Used to discard a failed regeneration's leftovers: the previous attempt's section
+        content for this part and language must not survive next to a FAILED part."""
+        self._conn.execute(
+            "DELETE FROM section_content WHERE language = %s AND section_id IN"
+            " (SELECT id FROM sections WHERE part_id = %s)",
+            (language, part_id),
+        )
+
     def sections(self, part_id: UUID, language: str) -> list[SectionContent]:
         rows = self._conn.execute(
             "SELECT sc.section_id, sc.language, sc.title, sc.summary FROM section_content sc"

@@ -6,7 +6,16 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
-from teachme.domain.models import GlossaryTerm, Outline, Part, PartContent, Question, QuestionKind, Section
+from teachme.domain.models import (
+    ContentStatus,
+    GlossaryTerm,
+    Outline,
+    Part,
+    PartContent,
+    Question,
+    QuestionKind,
+    Section,
+)
 from teachme.ports.file_store import FileStore
 
 
@@ -114,19 +123,27 @@ class SubjectBundleWriter:
         self._write(f"glossary.{language}.json", payload.encode(), "application/json")
 
     def write_part_content(self, part: Part, content: PartContent) -> None:
+        """A ready part gets its full teaching text; anything else (a failed attempt) gets only
+        the header, naming the error - no title, body or key points to look like real content."""
         if content.part_id != part.id:
             raise ValueError(
                 f"content.part_id {content.part_id} does not match part {part.id} (position {part.position})"
             )
         header = (
             f"<!-- teach-me part position={part.position} language={content.language}"
-            f" model={content.model} status={content.status.value} -->"
+            f" model={content.model} status={content.status.value}"
         )
+        if content.error:
+            header += f" error={json.dumps(content.error)}"
+        header += " -->"
+        relative = f"parts/{part.position + 1:02d}.{content.language}.md"
+        if content.status != ContentStatus.READY:
+            self._write(relative, f"{header}\n".encode(), "text/markdown")
+            return
         body = f"# {content.title}\n\n{content.body.strip()}\n"
         if content.key_points:
             points = "\n".join(f"- {p}" for p in content.key_points)
             body += f"\n## Key points\n\n{points}\n"
-        relative = f"parts/{part.position + 1:02d}.{content.language}.md"
         self._write(relative, f"{header}\n\n{body}".encode(), "text/markdown")
 
     def write_questions(

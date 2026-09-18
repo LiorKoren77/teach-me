@@ -116,6 +116,31 @@ def test_write_part_content_omits_key_points_section_when_empty():
     assert "## Key points" not in md
 
 
+def test_write_part_content_writes_a_failed_stub_with_no_body():
+    store = InMemoryFileStore()
+    writer = SubjectBundleWriter([store], "geo-12345678", 1)
+    part = Part(id=uuid4(), outline_id=uuid4(), position=0, title="Intro", page_start=0, page_end=3)
+    writer.write_part_content(
+        part,
+        PartContent(
+            part_id=part.id,
+            language="he",
+            title="Intro",
+            body="",
+            key_points=(),
+            status=ContentStatus.FAILED,
+            model="fake-model",
+            error="teaching service down",
+        ),
+    )
+    md = store.get("geo-12345678/v1/parts/01.he.md").decode()
+    assert md == (
+        "<!-- teach-me part position=0 language=he model=fake-model status=failed"
+        ' error="teaching service down" -->\n'
+    )
+    assert "#" not in md and "Key points" not in md
+
+
 def test_write_part_content_rejects_mismatched_part_id():
     store = InMemoryFileStore()
     writer = SubjectBundleWriter([store], "geo-12345678", 1)

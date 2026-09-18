@@ -334,21 +334,26 @@ class TutorialService:
                 questions=len(questions),
             )
         except (GenerationError, LLMError, ValueError) as exc:
-            # Discard the failed attempt's rows (part content, section content, questions) before
-            # recording the failure, so a FAILED part never keeps half of a previous good attempt.
+            # The rollback discards this attempt's uncommitted writes, but a *previous* successful
+            # attempt's rows (section content, questions) may still be sitting there committed from
+            # an earlier generate() call - a FAILED part must not keep half of a stale good attempt,
+            # so those are explicitly cleared here rather than assumed gone.
             self._conn.rollback()
-            self._content.upsert_part(
-                PartContent(
-                    part_id=part.id,
-                    language=language,
-                    title=part.title,
-                    body="",
-                    key_points=(),
-                    status=ContentStatus.FAILED,
-                    model=model,
-                    error=str(exc),
-                )
+            self._content.delete_sections(part.id, language)
+            self._questions.replace_for_part(part.id, language, [])
+            failed = PartContent(
+                part_id=part.id,
+                language=language,
+                title=part.title,
+                body="",
+                key_points=(),
+                status=ContentStatus.FAILED,
+                model=model,
+                error=str(exc),
             )
+            self._content.upsert_part(failed)
+            writer.write_part_content(part, failed)
+            self._write_questions_bundle(outline, language, writer)
             self._conn.commit()
             return PartLanguageResult(
                 part_position=part.position,
@@ -389,14 +394,19 @@ class TutorialService:
         source_terms = {t.slug: t.source_term for t in terms}
         questions = to_questions(bank, sections, language, source_terms, translations)
         self._questions.replace_for_part(part.id, language, questions)
-        positions: dict[UUID, tuple[int, int]] = {s.id: (part.position, s.position) for s in sections}
+        self._write_questions_bundle(outline, language, writer)
+        return questions
+
+    def _write_questions_bundle(self, outline: Outline, language: str, writer: SubjectBundleWriter) -> None:
+        """Rebuilds questions.<lang>.jsonl for the whole outline from the DB, so it always
+        reflects the current state of every part - including one just cleared after a failure."""
+        positions: dict[UUID, tuple[int, int]] = {}
         all_for_language: list[Question] = []
         for other in self._outlines.parts(outline.id):
             other_sections = self._outlines.sections(other.id)
             positions.update({s.id: (other.position, s.position) for s in other_sections})
             all_for_language.extend(self._questions.for_part(other.id, language))
         writer.write_questions(language, all_for_language, positions)
-        return questions
 
     # status and publishing ------------------------------------------------------------------
     def _evaluate(self, subject: Subject, outline: Outline) -> TutorialStatus:
