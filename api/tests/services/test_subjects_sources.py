@@ -53,6 +53,14 @@ def test_source_register_validates_type_and_stores_file(services):
         source_service.register(subject, "archive.zip", b"PK")
 
 
+def test_register_reduces_filename_to_a_basename(services):
+    subject_service, source_service, files, _ = services
+    subject = subject_service.get_or_create("Geo")
+    source = source_service.register(subject, "../../etc/passwd.pdf", make_pdf(1))
+    assert source.file_key.endswith("/passwd.pdf")
+    assert source.filename == "passwd.pdf"
+
+
 def test_media_type_for_webp_and_gzipped_files():
     assert SourceService.media_type_for("a.webp") == "image/webp"
     assert SourceService.media_type_for("doc.pdf.gz") is None

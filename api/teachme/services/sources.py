@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import mimetypes
+from pathlib import PurePosixPath
 from uuid import UUID, uuid4
 
 import psycopg
@@ -64,13 +65,16 @@ class SourceService:
 
     def register(self, subject: Subject, filename: str, data: bytes) -> Source:
         self._require_draft(subject)
-        media_type = self.media_type_for(filename)
+        safe_name = PurePosixPath(filename.replace("\\", "/")).name
+        if not safe_name:
+            raise UnsupportedMediaType("empty filename")
+        media_type = self.media_type_for(safe_name)
         accepted = sorted(self.accepted_media_types())
         if media_type is None or media_type not in accepted:
             raise UnsupportedMediaType(f"{filename!r} ({media_type}) is not accepted; accepted: {accepted}")
-        key = f"sources/{subject.id}/{uuid4()}/{filename}"
+        key = f"sources/{subject.id}/{uuid4()}/{safe_name}"
         self._files.put(key, data, media_type)
-        source = self._sources.create(subject.id, filename, media_type, key, len(data))
+        source = self._sources.create(subject.id, safe_name, media_type, key, len(data))
         self._conn.commit()
         return source
 
