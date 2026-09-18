@@ -1,22 +1,22 @@
 "use client";
 import { useAuth } from "@clerk/nextjs";
 import { useCallback, useEffect, useState } from "react";
-import { adminSources, adminSubjects, adminUsage } from "@/lib/api/admin";
+import { adminSubjects, adminUsage } from "@/lib/api/admin";
 import { ApiError } from "@/lib/api/client";
-import type { AdminSource, AdminSubject, UsageRow } from "@/lib/api/types";
+import type { AdminSubject, UsageRow } from "@/lib/api/types";
 import { useApiError } from "./useApiError";
 
 /**
- * Read-only admin data: every subject, then the selected subject's sources and usage. The
- * backend enforces the admin role - a 403 here means the caller is signed in but not an admin,
- * so it is reported as `forbidden` rather than folded into `error`, letting the screen render a
- * plain refusal message instead of a generic failure.
+ * The admin screen's own data: every subject, and the selected subject's usage. The sources and
+ * the tutorial status belong to `useAdminActions`, which polls them while anything is moving, so
+ * they are not read twice here. The backend enforces the admin role - a 403 here means the
+ * caller is signed in but not an admin, so it is reported as `forbidden` rather than folded into
+ * `error`, letting the screen render a plain refusal message instead of a generic failure.
  */
 export function useAdmin() {
   const { getToken, isSignedIn } = useAuth();
   const [subjects, setSubjects] = useState<AdminSubject[] | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [sources, setSources] = useState<AdminSource[] | null>(null);
   const [usage, setUsage] = useState<UsageRow[] | null>(null);
   const [forbidden, setForbidden] = useState(false);
   const { error, fail: report } = useApiError();
@@ -49,13 +49,6 @@ export function useAdmin() {
   useEffect(() => {
     if (!isSignedIn || !selectedId) return;
     let cancelled = false;
-    adminSources(selectedId, getToken)
-      .then((rows) => {
-        if (!cancelled) setSources(rows);
-      })
-      .catch((failure) => {
-        if (!cancelled) fail(failure);
-      });
     adminUsage(selectedId, getToken)
       .then((rows) => {
         if (!cancelled) setUsage(rows);
@@ -69,6 +62,11 @@ export function useAdmin() {
   }, [isSignedIn, selectedId, getToken, fail]);
 
   const selectSubject = useCallback((id: string) => setSelectedId(id), []);
+  /** Publishing answers with the updated subject, so the list need not be read again for it. */
+  const replaceSubject = useCallback(
+    (subject: AdminSubject) => setSubjects((rows) => (rows ?? []).map((row) => (row.id === subject.id ? subject : row))),
+    [],
+  );
 
-  return { subjects, selectedId, sources, usage, forbidden, error, selectSubject };
+  return { subjects, selectedId, usage, forbidden, error, selectSubject, replaceSubject };
 }

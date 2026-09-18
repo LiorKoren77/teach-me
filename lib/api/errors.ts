@@ -1,7 +1,14 @@
 import { ApiError } from "./client";
 
 /** The i18n key an API failure is shown to the reader as; `lib/i18n.ts` holds the messages. */
-export type ErrorKey = "unauthorized" | "forbidden" | "conflict" | "rateLimited" | "unknown";
+export type ErrorKey =
+  | "unauthorized"
+  | "forbidden"
+  | "conflict"
+  | "payloadTooLarge"
+  | "unsupportedType"
+  | "rateLimited"
+  | "unknown";
 
 /**
  * One mapping from a failed request to something a reader can act on. The `detail` the API sends
@@ -13,6 +20,8 @@ export function errorKeyOf(failure: unknown): ErrorKey {
   if (status === 401) return "unauthorized";
   if (status === 403) return "forbidden";
   if (status === 409) return "conflict";
+  if (status === 413) return "payloadTooLarge";
+  if (status === 415) return "unsupportedType";
   if (status === 429) return "rateLimited";
   return "unknown";
 }

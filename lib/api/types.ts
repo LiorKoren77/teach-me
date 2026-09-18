@@ -25,3 +25,27 @@ export interface StudentSource { filename: string; media_type: string; page_coun
 export interface AdminSubject { id: string; name: string; state: string; languages: Language[]; current_outline_version: number | null; }
 export interface AdminSource { id: string; filename: string; media_type: string; status: string; page_count: number | null; detected_language: string | null; error: string | null; }
 export interface UsageRow { purpose: string; model: string; calls: number; input_tokens: number; output_tokens: number; cache_read_tokens: number; cache_write_tokens: number; cost_usd: number; avg_latency_ms: number; }
+
+// --- Admin upload pane (stage 5) -------------------------------------------------------------
+// Mirrors api/teachme/routes/schemas.py's Capabilities, AdminJob and AdminSubjectStatus, and
+// api/teachme/services/tutorial.py's status view (the same numbers `teachme tutorial status`
+// prints). Every one of these is behind the admin role.
+
+/** The media types `SourceService` accepts, for the file picker's `accept`, and the per-file size cap. */
+export interface AdminCapabilities { accepted_media_types: string[]; max_upload_bytes: number; }
+export type JobStatus = "queued" | "running" | "done" | "failed";
+export interface AdminJob { id: string; kind: string; status: JobStatus; attempts: number; error: string | null; }
+/** What an upload answers with: the registered source, plus the ingestion job now queued for it. */
+export interface AdminUpload extends AdminSource { job_id: string; }
+export interface AdminJobRef { job_id: string; }
+export interface AdminLanguageStatus { language: Language; parts_ready: number; parts_total: number; questions: number; complete: boolean; failed: number[]; }
+export interface AdminSubjectStatus {
+  state: string;
+  outline_version: number | null;
+  published_version: number | null;
+  parts_total: number;
+  languages: AdminLanguageStatus[];
+  /** True when some outline version is complete in every enabled language; `publish` takes it. */
+  publishable: boolean;
+  publishable_version: number | null;
+}

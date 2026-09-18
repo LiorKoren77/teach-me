@@ -62,6 +62,38 @@ export interface Strings {
   sourceStatus: Record<string, string>;
   adminVersion: (v: number | null) => string;
   usage: Record<string, string>;
+  // Admin upload pane and subject actions (stage 5).
+  uploadSources: string;
+  chooseFile: string;
+  upload: string;
+  uploading: string;
+  acceptedTypes: (types: string) => string;
+  uploadLocked: string;
+  /** Shown when a chosen file is over the backend's `max_upload_bytes`; the picker stays usable. */
+  fileTooLarge: (maxMb: number) => string;
+  noSources: string;
+  deleteSource: string;
+  reingestSource: string;
+  confirmDelete: (filename: string) => string;
+  confirmReingest: (filename: string) => string;
+  /** The language the ingestion detected in a source, as the ISO code the API reports. */
+  detectedLanguage: (code: string) => string;
+  subjectActions: string;
+  generate: string;
+  publish: string;
+  unpublish: string;
+  /** Job kinds and states, keyed by the value the API sends. */
+  jobKind: Record<string, string>;
+  jobStatus: Record<string, string>;
+  jobLine: (kind: string, status: string) => string;
+  /** Shown next to the job line once polling gave up on a job that never reached done/failed. */
+  jobStale: string;
+  partsReady: (ready: number, total: number) => string;
+  questionsReady: (n: number) => string;
+  failedParts: (positions: string) => string;
+  publishable: (version: number) => string;
+  notPublishable: string;
+  publishedVersion: (v: number | null) => string;
 }
 
 const STRINGS: Record<Language, Strings> = {
@@ -80,7 +112,9 @@ const STRINGS: Record<Language, Strings> = {
     grade: { correct: "Correct", partial: "Partly right", incorrect: "Not right", off_topic: "Off topic", junk: "Unclear" },
     errors: {
       unauthorized: "Your session has ended - signing you in again.", forbidden: "You do not have access to this.",
-      conflict: "This has already moved on. Reload the page to catch up.", rateLimited: "Too many requests. Wait a moment and try again.",
+      conflict: "This has already moved on. Reload the page to catch up.",
+      payloadTooLarge: "That file is too large to upload.", unsupportedType: "That file type is not accepted.",
+      rateLimited: "Too many requests. Wait a moment and try again.",
       unknown: "Something went wrong. Please try again.",
     },
     adminRoleRequired: "You need the admin role to view this page.",
@@ -89,6 +123,26 @@ const STRINGS: Record<Language, Strings> = {
     sourceStatus: { uploaded: "Uploaded", extracting: "Extracting", chunking: "Chunking", indexing: "Indexing", ready: "Ready", failed: "Failed" },
     adminVersion: (v: number | null) => (v === null ? "No outline yet" : `Version ${v}`),
     usage: { purpose: "Purpose", model: "Model", calls: "Calls", input: "Input tokens", output: "Output tokens", cost: "Cost", total: "Total" },
+    uploadSources: "Upload sources", chooseFile: "Choose a file", upload: "Upload", uploading: "Uploading…",
+    acceptedTypes: (types: string) => `Accepted: ${types}`,
+    uploadLocked: "A published subject is locked; unpublish it to change its sources.",
+    fileTooLarge: (maxMb: number) => `That file is larger than the ${new Intl.NumberFormat("en", { maximumFractionDigits: 1 }).format(maxMb)} MB limit. Choose another file.`,
+    noSources: "No sources yet.",
+    deleteSource: "Delete", reingestSource: "Re-ingest",
+    confirmDelete: (filename: string) => `Delete ${filename} and everything indexed from it?`,
+    confirmReingest: (filename: string) => `Ingest ${filename} again from the start?`,
+    detectedLanguage: (code: string) => `Language: ${code}`,
+    subjectActions: "Subject", generate: "Generate", publish: "Publish", unpublish: "Unpublish",
+    jobKind: { ingest_source: "Ingesting", generate_subject: "Generating", generate_unit: "Generating" },
+    jobStatus: { queued: "Queued", running: "Running", done: "Done", failed: "Failed" },
+    jobLine: (kind: string, status: string) => `${kind}: ${status}`,
+    jobStale: "Still running - check back later.",
+    partsReady: (ready: number, total: number) => `${ready} of ${total} parts ready`,
+    questionsReady: (n: number) => `${n} questions`,
+    failedParts: (positions: string) => `Parts that failed: ${positions}`,
+    publishable: (version: number) => `Version ${version} is ready to publish`,
+    notPublishable: "Not every language is complete yet.",
+    publishedVersion: (v: number | null) => (v === null ? "Not published" : `Published version ${v}`),
   },
   he: {
     appName: "teach-me", signIn: "כניסה", subjects: "המקצועות שלך", noSubjects: "אין עדיין מקצועות זמינים.",
@@ -105,7 +159,9 @@ const STRINGS: Record<Language, Strings> = {
     grade: { correct: "נכון", partial: "נכון חלקית", incorrect: "לא נכון", off_topic: "לא בנושא", junk: "לא ברור" },
     errors: {
       unauthorized: "ההתחברות הסתיימה - מחברים אותך מחדש.", forbidden: "אין לך הרשאה לתוכן הזה.",
-      conflict: "המצב כבר התקדם. רעננו את העמוד.", rateLimited: "יותר מדי בקשות. המתינו רגע ונסו שוב.",
+      conflict: "המצב כבר התקדם. רעננו את העמוד.",
+      payloadTooLarge: "הקובץ גדול מדי להעלאה.", unsupportedType: "סוג הקובץ אינו נתמך.",
+      rateLimited: "יותר מדי בקשות. המתינו רגע ונסו שוב.",
       unknown: "משהו נכשל. נסו שוב.",
     },
     adminRoleRequired: "נדרשת הרשאת מנהל כדי לצפות בעמוד זה.",
@@ -114,6 +170,26 @@ const STRINGS: Record<Language, Strings> = {
     sourceStatus: { uploaded: "הועלה", extracting: "מחלץ טקסט", chunking: "מפצל", indexing: "מאנדקס", ready: "מוכן", failed: "נכשל" },
     adminVersion: (v: number | null) => (v === null ? "אין עדיין מתווה" : `גרסה ${v}`),
     usage: { purpose: "מטרה", model: "מודל", calls: "קריאות", input: "אסימוני קלט", output: "אסימוני פלט", cost: "עלות", total: "סה\"כ" },
+    uploadSources: "העלאת מקורות", chooseFile: "בחירת קובץ", upload: "העלאה", uploading: "מעלים…",
+    acceptedTypes: (types: string) => `סוגים נתמכים: ${types}`,
+    uploadLocked: "מקצוע שפורסם נעול; בטלו את הפרסום כדי לשנות את המקורות.",
+    fileTooLarge: (maxMb: number) => `הקובץ גדול מהמגבלה של ${new Intl.NumberFormat("he", { maximumFractionDigits: 1 }).format(maxMb)} מגה-בייט. בחרו קובץ אחר.`,
+    noSources: "אין עדיין מקורות.",
+    deleteSource: "מחיקה", reingestSource: "עיבוד מחדש",
+    confirmDelete: (filename: string) => `למחוק את ${filename} ואת כל מה שנאנדקס ממנו?`,
+    confirmReingest: (filename: string) => `לעבד מחדש את ${filename} מההתחלה?`,
+    detectedLanguage: (code: string) => `שפה: ${code}`,
+    subjectActions: "מקצוע", generate: "יצירת תוכן", publish: "פרסום", unpublish: "ביטול פרסום",
+    jobKind: { ingest_source: "מעבד מקור", generate_subject: "יוצר תוכן", generate_unit: "יוצר תוכן" },
+    jobStatus: { queued: "בתור", running: "רץ", done: "הסתיים", failed: "נכשל" },
+    jobLine: (kind: string, status: string) => `${kind}: ${status}`,
+    jobStale: "עדיין רץ - בדקו שוב מאוחר יותר.",
+    partsReady: (ready: number, total: number) => `${ready} מתוך ${total} חלקים מוכנים`,
+    questionsReady: (n: number) => `${n} שאלות`,
+    failedParts: (positions: string) => `חלקים שנכשלו: ${positions}`,
+    publishable: (version: number) => `גרסה ${version} מוכנה לפרסום`,
+    notPublishable: "לא כל השפות הושלמו עדיין.",
+    publishedVersion: (v: number | null) => (v === null ? "לא פורסם" : `פורסמה גרסה ${v}`),
   },
   pt: {
     appName: "teach-me", signIn: "Entrar", subjects: "As suas matérias", noSubjects: "Ainda não há matérias publicadas.",
@@ -130,7 +206,9 @@ const STRINGS: Record<Language, Strings> = {
     grade: { correct: "Correto", partial: "Parcialmente correto", incorrect: "Incorreto", off_topic: "Fora do tema", junk: "Pouco claro" },
     errors: {
       unauthorized: "A sua sessão terminou - a iniciar sessão novamente.", forbidden: "Não tem acesso a isto.",
-      conflict: "Isto já avançou. Recarregue a página.", rateLimited: "Demasiados pedidos. Aguarde um momento e tente novamente.",
+      conflict: "Isto já avançou. Recarregue a página.",
+      payloadTooLarge: "Esse ficheiro é demasiado grande para carregar.", unsupportedType: "Esse tipo de ficheiro não é aceite.",
+      rateLimited: "Demasiados pedidos. Aguarde um momento e tente novamente.",
       unknown: "Algo falhou. Tente novamente.",
     },
     adminRoleRequired: "É necessária a função de administrador para ver esta página.",
@@ -139,6 +217,26 @@ const STRINGS: Record<Language, Strings> = {
     sourceStatus: { uploaded: "Carregado", extracting: "A extrair", chunking: "A dividir", indexing: "A indexar", ready: "Pronto", failed: "Falhou" },
     adminVersion: (v: number | null) => (v === null ? "Ainda sem esboço" : `Versão ${v}`),
     usage: { purpose: "Finalidade", model: "Modelo", calls: "Chamadas", input: "Tokens de entrada", output: "Tokens de saída", cost: "Custo", total: "Total" },
+    uploadSources: "Carregar fontes", chooseFile: "Escolher um ficheiro", upload: "Carregar", uploading: "A carregar…",
+    acceptedTypes: (types: string) => `Aceites: ${types}`,
+    uploadLocked: "Uma matéria publicada está bloqueada; retire a publicação para alterar as fontes.",
+    fileTooLarge: (maxMb: number) => `Esse ficheiro é maior do que o limite de ${new Intl.NumberFormat("pt", { maximumFractionDigits: 1 }).format(maxMb)} MB. Escolha outro ficheiro.`,
+    noSources: "Ainda não há fontes.",
+    deleteSource: "Eliminar", reingestSource: "Reprocessar",
+    confirmDelete: (filename: string) => `Eliminar ${filename} e tudo o que foi indexado a partir dele?`,
+    confirmReingest: (filename: string) => `Processar ${filename} novamente desde o início?`,
+    detectedLanguage: (code: string) => `Idioma: ${code}`,
+    subjectActions: "Matéria", generate: "Gerar", publish: "Publicar", unpublish: "Retirar publicação",
+    jobKind: { ingest_source: "A processar", generate_subject: "A gerar", generate_unit: "A gerar" },
+    jobStatus: { queued: "Em fila", running: "Em curso", done: "Concluído", failed: "Falhou" },
+    jobLine: (kind: string, status: string) => `${kind}: ${status}`,
+    jobStale: "Ainda em curso - verifique novamente mais tarde.",
+    partsReady: (ready: number, total: number) => `${ready} de ${total} partes prontas`,
+    questionsReady: (n: number) => `${n} perguntas`,
+    failedParts: (positions: string) => `Partes que falharam: ${positions}`,
+    publishable: (version: number) => `A versão ${version} está pronta para publicar`,
+    notPublishable: "Ainda não estão todos os idiomas completos.",
+    publishedVersion: (v: number | null) => (v === null ? "Não publicado" : `Versão publicada ${v}`),
   },
 };
 
