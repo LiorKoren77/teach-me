@@ -100,7 +100,7 @@ def test_failure_records_resume_point_and_rerun_skips_extraction(env):
             raise RuntimeError("upstream hiccup")
         return good(request)
 
-    fake_llm._responders[ChunksOut] = flaky
+    fake_llm.set_responder(ChunksOut, flaky)
     pipeline = IngestionPipeline(deps)
     with pytest.raises(RuntimeError):
         pipeline.ingest_source(source.id)
@@ -121,7 +121,7 @@ def test_extraction_failure_rolls_back_partial_writes_before_marking_failed(env)
     def boom(request):
         raise RuntimeError("language service down")
 
-    fake_llm._responders[DetectedLanguage] = boom
+    fake_llm.set_responder(DetectedLanguage, boom)
     pipeline = IngestionPipeline(deps)
     with pytest.raises(RuntimeError):
         pipeline.ingest_source(source.id)
@@ -130,7 +130,7 @@ def test_extraction_failure_rolls_back_partial_writes_before_marking_failed(env)
     assert failed.status == SourceStatus.FAILED and failed.resume_status == SourceStatus.EXTRACTING
     assert deps.pages.list(source.id) == []
 
-    fake_llm._responders[DetectedLanguage] = default_responders()[DetectedLanguage]
+    fake_llm.set_responder(DetectedLanguage, default_responders()[DetectedLanguage])
     result = pipeline.ingest_source(source.id)
     assert result.status == SourceStatus.READY
 

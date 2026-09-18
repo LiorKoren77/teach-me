@@ -35,6 +35,11 @@ class FakeLLM:
         self._media_types = media_types
         self.calls: list[StructuredRequest] = []
 
+    def set_responder(self, schema: type[BaseModel], responder: Responder) -> None:
+        """Install or replace the responder for one output schema. Tests use this to make a
+        single step fail or answer differently without reaching into private state."""
+        self._responders[schema] = responder
+
     def capabilities(self) -> LLMCapabilities:
         return LLMCapabilities(media_types=self._media_types)
 

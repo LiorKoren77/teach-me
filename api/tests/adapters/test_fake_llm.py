@@ -29,3 +29,11 @@ def test_missing_responder_is_a_parse_error():
 
 def test_capabilities_default_to_pdf_and_text():
     assert "application/pdf" in FakeLLM({}).capabilities().media_types
+
+
+def test_set_responder_installs_and_replaces_a_responder():
+    fake = FakeLLM({})
+    fake.set_responder(Out, lambda req: Out(echo="first"))
+    assert fake.generate_structured(_req("x"), Out).output.echo == "first"
+    fake.set_responder(Out, lambda req: Out(echo="second"))
+    assert fake.generate_structured(_req("x"), Out).output.echo == "second"
