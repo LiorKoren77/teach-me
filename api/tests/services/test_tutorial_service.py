@@ -5,8 +5,11 @@ import pytest
 from teachme.container import Container
 from teachme.domain.models import ContentStatus, SubjectState
 from teachme.generation.errors import SubjectNotReady
+from teachme.generation.glossary import GlossaryOut
+from teachme.generation.question_bank import QuestionBankOut
 from teachme.ingestion.bundle import bundle_slug
 from teachme.ingestion.errors import SubjectLocked
+from teachme.ports.llm import LLMError
 from teachme.repositories.usage import UsageRepository
 from teachme.settings import Settings
 from tests.helpers import make_pdf
@@ -127,3 +130,38 @@ def test_rendered_part_resolves_placeholders_with_source_gloss(container):
     assert rendered.title == "Fake part title" and rendered.sections
     same_language = container.tutorial_service.rendered_part(subject, "en", part_position=0)
     assert "(biosfera)" not in same_language.body
+
+
+def test_a_failed_part_is_reported_and_leaves_nothing_behind(container):
+    subject = _ingested_subject(container)
+
+    def boom(request):
+        raise LLMError("question service down")
+
+    container.llm.inner.set_responder(QuestionBankOut, boom)
+    report = container.tutorial_service.generate(subject)
+    assert report.failures
+
+    outline = container.outlines.latest(subject.id)
+    for part in container.outlines.parts(outline.id):
+        for language in ("he", "en"):
+            content = container.content.part(part.id, language)
+            assert content is not None and content.status == ContentStatus.FAILED
+            assert container.content.sections(part.id, language) == []
+
+    slug = bundle_slug(subject.name, subject.id)
+    keys = container.bundle_stores[0].list_keys(f"{slug}/")
+    assert [key for key in keys if "/parts/" in key] == []
+    assert container.tutorial_service.status(subject).publishable is False
+
+
+def test_a_glossary_failure_leaves_no_new_outline_version(container):
+    subject = _ingested_subject(container)
+
+    def boom(request):
+        raise LLMError("glossary service down")
+
+    container.llm.inner.set_responder(GlossaryOut, boom)
+    with pytest.raises(LLMError):
+        container.tutorial_service.generate(subject)
+    assert container.outlines.latest(subject.id) is None

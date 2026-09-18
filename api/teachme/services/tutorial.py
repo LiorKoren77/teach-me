@@ -159,25 +159,32 @@ class TutorialService:
         writer = SubjectBundleWriter(self._bundle_stores, bundle_slug(subject.name, subject.id))
         model = self._settings.model_generation
 
-        with usage_context(subject_id=subject.id):
-            outline = self._outlines.latest(subject.id)
-            new_outline = not content_only or outline is None
-            if new_outline:
-                outline = self._create_outline(subject, corpus, model, writer)
-            assert outline is not None
-            all_parts = self._outlines.parts(outline.id)
-            terms = self._glossary.terms(outline.id)
-            wanted = [p for p in all_parts if parts is None or p.position in parts]
+        try:
+            with usage_context(subject_id=subject.id):
+                outline = self._outlines.latest(subject.id)
+                new_outline = not content_only or outline is None
+                if new_outline:
+                    outline = self._create_outline(subject, corpus, model, writer)
+                assert outline is not None
+                all_parts = self._outlines.parts(outline.id)
+                terms = self._glossary.terms(outline.id)
+                wanted = [p for p in all_parts if parts is None or p.position in parts]
 
-            results: list[PartLanguageResult] = []
-            for language in chosen_languages:
-                translations = self._ensure_translations(outline, corpus, language, terms, model, writer)
-                for part in wanted:
-                    results.append(
-                        self._generate_part(
-                            subject, corpus, outline, part, language, terms, translations, model, writer
+                results: list[PartLanguageResult] = []
+                for language in chosen_languages:
+                    translations = self._ensure_translations(outline, corpus, language, terms, model, writer)
+                    for part in wanted:
+                        results.append(
+                            self._generate_part(
+                                subject, corpus, outline, part, language, terms, translations, model, writer
+                            )
                         )
-                    )
+        except Exception:
+            # Nothing half-written survives: the outline version, its parts and its glossary are
+            # all created in one uncommitted transaction, so a failure before the commit in
+            # _create_outline must not leave a dangling version behind for a later commit to keep.
+            self._conn.rollback()
+            raise
         return GenerationReport(
             subject=subject.name,
             outline_version=outline.version,
@@ -295,7 +302,6 @@ class TutorialService:
                     for sc in teaching.sections
                 ]
             )
-            writer.write_part_content(part, content)
             questions = self._generate_questions(
                 subject,
                 corpus,
@@ -309,6 +315,7 @@ class TutorialService:
                 model,
                 writer,
             )
+            writer.write_part_content(part, content)  # bundle files only once the part succeeded
             self._conn.commit()
             return PartLanguageResult(
                 part_position=part.position,
@@ -316,7 +323,10 @@ class TutorialService:
                 content_status=ContentStatus.READY,
                 questions=len(questions),
             )
-        except (GenerationError, LLMError) as exc:
+        except (GenerationError, LLMError, ValueError) as exc:
+            # Discard the failed attempt's rows (part content, section content, questions) before
+            # recording the failure, so a FAILED part never keeps half of a previous good attempt.
+            self._conn.rollback()
             self._content.upsert_part(
                 PartContent(
                     part_id=part.id,
