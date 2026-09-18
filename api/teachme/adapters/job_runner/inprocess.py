@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from uuid import UUID, uuid4
 
 from teachme.ports.job_runner import JobHandler, JobPayload, UnknownJobKind
 from teachme.repositories.jobs import JobRepository
+
+log = logging.getLogger(__name__)
 
 
 class InProcessJobRunner:
@@ -34,6 +37,8 @@ class InProcessJobRunner:
         if handler is None:
             if self._jobs:
                 self._jobs.set_status(job_id, "failed", error=f"unknown job kind {kind!r}")
+                if self._commit:
+                    self._commit()
             raise UnknownJobKind(kind)
         if self._jobs:
             self._jobs.set_status(job_id, "running")
@@ -51,7 +56,7 @@ class InProcessJobRunner:
                     if self._commit:
                         self._commit()
                 except Exception:
-                    pass
+                    log.exception("could not record job %s as failed", job_id)
             raise
         if self._jobs:
             self._jobs.set_status(job_id, "done")

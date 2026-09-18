@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 
 import boto3
 import pytest
@@ -56,6 +57,32 @@ def test_inprocess_rolls_back_before_recording_failure_then_commits(db):
     db.rollback()
     row = db.execute("SELECT status, error FROM jobs WHERE kind = 'boom'").fetchone()
     assert row["status"] == "failed" and row["error"] == "bad"
+
+
+def test_inprocess_logs_when_recording_failure_raises(db, caplog):
+    jobs = JobRepository(db)
+
+    def boom(payload):
+        raise RuntimeError("bad")
+
+    def bad_rollback():
+        raise RuntimeError("rollback boom")
+
+    runner = InProcessJobRunner({"boom": boom}, jobs=jobs, commit=db.commit, rollback=bad_rollback)
+    with caplog.at_level(logging.ERROR):
+        with pytest.raises(RuntimeError, match="bad"):
+            runner.enqueue("boom", {})
+    assert any("could not record job" in record.message for record in caplog.records)
+
+
+def test_inprocess_unknown_kind_commits_failure(db):
+    jobs = JobRepository(db)
+    runner = InProcessJobRunner({}, jobs=jobs, commit=db.commit)
+    with pytest.raises(UnknownJobKind):
+        runner.enqueue("nope", {})
+    db.rollback()
+    row = db.execute("SELECT status FROM jobs WHERE kind = 'nope'").fetchone()
+    assert row["status"] == "failed"
 
 
 def test_sqs_sends_message_with_job_id():
