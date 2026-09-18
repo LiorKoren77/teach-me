@@ -22,6 +22,10 @@ const STRINGS = {
     questionOf: (i: number, total: number) => `Question ${i} of ${total}`, chooseOne: "Choose one",
     status: { not_started: "Not started", learning: "Reading", quizzing: "Answering", reinforcing: "Reviewing", passed: "Passed", stalled: "Stalled" } as Record<string, string>,
     grade: { correct: "Correct", partial: "Partly right", incorrect: "Not right", off_topic: "Off topic", junk: "Unclear" } as Record<string, string>,
+    adminRoleRequired: "You need the admin role to view this page.",
+    adminSubjects: "Subjects", adminUsage: "Usage", adminState: "State",
+    adminVersion: (v: number | null) => (v === null ? "No outline yet" : `Version ${v}`),
+    usage: { purpose: "Purpose", model: "Model", calls: "Calls", input: "Input tokens", output: "Output tokens", cost: "Cost", total: "Total" } as Record<string, string>,
   },
   he: {
     appName: "teach-me", signIn: "כניסה", subjects: "המקצועות שלך", noSubjects: "אין עדיין מקצועות זמינים.",
@@ -34,6 +38,10 @@ const STRINGS = {
     questionOf: (i: number, total: number) => `שאלה ${i} מתוך ${total}`, chooseOne: "בחרו תשובה אחת",
     status: { not_started: "טרם התחיל", learning: "קריאה", quizzing: "מענה", reinforcing: "חזרה", passed: "הושלם", stalled: "נעצר" } as Record<string, string>,
     grade: { correct: "נכון", partial: "נכון חלקית", incorrect: "לא נכון", off_topic: "לא בנושא", junk: "לא ברור" } as Record<string, string>,
+    adminRoleRequired: "נדרשת הרשאת מנהל כדי לצפות בעמוד זה.",
+    adminSubjects: "מקצועות", adminUsage: "שימוש", adminState: "מצב",
+    adminVersion: (v: number | null) => (v === null ? "אין עדיין מתווה" : `גרסה ${v}`),
+    usage: { purpose: "מטרה", model: "מודל", calls: "קריאות", input: "אסימוני קלט", output: "אסימוני פלט", cost: "עלות", total: "סה\"כ" } as Record<string, string>,
   },
   pt: {
     appName: "teach-me", signIn: "Entrar", subjects: "As suas matérias", noSubjects: "Ainda não há matérias publicadas.",
@@ -46,6 +54,10 @@ const STRINGS = {
     questionOf: (i: number, total: number) => `Pergunta ${i} de ${total}`, chooseOne: "Escolha uma",
     status: { not_started: "Não iniciado", learning: "A ler", quizzing: "A responder", reinforcing: "A rever", passed: "Concluído", stalled: "Parado" } as Record<string, string>,
     grade: { correct: "Correto", partial: "Parcialmente correto", incorrect: "Incorreto", off_topic: "Fora do tema", junk: "Pouco claro" } as Record<string, string>,
+    adminRoleRequired: "É necessária a função de administrador para ver esta página.",
+    adminSubjects: "Matérias", adminUsage: "Utilização", adminState: "Estado",
+    adminVersion: (v: number | null) => (v === null ? "Ainda sem esboço" : `Versão ${v}`),
+    usage: { purpose: "Finalidade", model: "Modelo", calls: "Chamadas", input: "Tokens de entrada", output: "Tokens de saída", cost: "Custo", total: "Total" } as Record<string, string>,
   },
 };
 
