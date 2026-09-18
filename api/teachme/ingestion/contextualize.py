@@ -93,6 +93,16 @@ def _contextualize_batch(
     first, last = batch[0].page_index, batch[-1].page_index
     result: list[Chunk] = []
     for out in output.chunks:
+        if out.page_start < first - 1:
+            raise CoverageError(
+                f"chunk page range ({out.page_start}, {out.page_end}) starts too far before batch "
+                f"({first}, {last})"
+            )
+        if out.page_end > last + 1:
+            raise CoverageError(
+                f"chunk page range ({out.page_start}, {out.page_end}) ends too far after batch "
+                f"({first}, {last})"
+            )
         start = min(max(out.page_start, first), last)
         end = min(max(out.page_end, start), last)
         result.append(

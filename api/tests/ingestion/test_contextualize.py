@@ -9,6 +9,7 @@ from teachme.domain.models import Chunk, Page
 from teachme.ingestion.contextualize import (
     ChunkOut,
     ChunksOut,
+    _contextualize_batch,
     batch_pages,
     contextualize,
     render_pages,
@@ -47,6 +48,34 @@ def test_validate_coverage_reports_missing_pages():
     validate_coverage(_pages(2), chunks)
     with pytest.raises(CoverageError, match="2"):
         validate_coverage(_pages(3), chunks)
+
+
+def test_chunk_range_wholly_outside_batch_raises_coverage_error():
+    def _wild_range(req):
+        return ChunksOut(
+            chunks=[ChunkOut(context="ctx", original_text="Text of page 0.", page_start=0, page_end=999)]
+        )
+
+    llm = FakeLLM({ChunksOut: _wild_range})
+    with pytest.raises(CoverageError, match=r"0.*999|999.*0"):
+        _contextualize_batch(llm, "fake-model", "system", "en", _pages(2), before=[], after=[])
+
+
+def test_chunk_range_bleeding_one_page_into_neighbour_is_clamped():
+    def _bleed_one_before(req):
+        return ChunksOut(
+            chunks=[
+                ChunkOut(
+                    context="ctx", original_text="Text of page 1.\nText of page 2.", page_start=0, page_end=2
+                )
+            ]
+        )
+
+    pages = _pages(3)
+    batch = pages[1:3]  # first=1, last=2
+    llm = FakeLLM({ChunksOut: _bleed_one_before})
+    chunks = _contextualize_batch(llm, "fake-model", "system", "en", batch, before=pages[0:1], after=[])
+    assert [(c.page_start, c.page_end) for c in chunks] == [(1, 2)]
 
 
 def test_contextualize_includes_neighbours_and_returns_domain_chunks():
