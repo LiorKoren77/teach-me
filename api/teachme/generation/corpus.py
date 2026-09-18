@@ -40,6 +40,16 @@ class SubjectCorpus(BaseModel):
         page = self.pages[global_index]
         return page.source_id, page.page_index
 
+    def source_ranges(self) -> list[tuple[UUID, int, int]]:
+        """(source_id, first_global_index, last_global_index) per source, in order."""
+        ranges: list[tuple[UUID, int, int]] = []
+        for page in self.pages:
+            if ranges and ranges[-1][0] == page.source_id:
+                ranges[-1] = (page.source_id, ranges[-1][1], page.global_index)
+            else:
+                ranges.append((page.source_id, page.global_index, page.global_index))
+        return ranges
+
     def render(self, first: int | None = None, last: int | None = None) -> str:
         """Pages [first, last] (inclusive, global) grouped by source. Defaults to everything."""
         first = 0 if first is None else first
