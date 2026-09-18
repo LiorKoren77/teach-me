@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from enum import StrEnum
 from uuid import UUID, uuid4
 
 import psycopg
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from teachme.domain.glossary.render import GlossaryView, render_placeholders
 from teachme.domain.models import (
@@ -64,6 +65,40 @@ class GenerationReport(BaseModel):
     @property
     def failures(self) -> list[PartLanguageResult]:
         return [r for r in self.results if r.content_status != ContentStatus.READY]
+
+
+class UnitKind(StrEnum):
+    OUTLINE = "outline"
+    PART = "part"
+
+
+class GenerationUnit(BaseModel):
+    """One job-sized piece of a generation run. It travels in a job payload, so every field is a
+    plain serializable value and nothing is carried in memory between units.
+
+    OUTLINE: the subject's outline and glossary, plus the glossary translations of `languages`.
+    PART: the teaching text and question bank of one part, in one language, against one outline
+    version.
+
+    Idempotence. A PART unit replaces the part's content, its section content and its questions for
+    its language, so running it twice leaves exactly one copy of each and a retry is free. An
+    OUTLINE unit with new_outline=False reuses the current version - it creates one only when the
+    subject has none at all - and rewrites the glossary translations in place, so it is idempotent
+    too. new_outline=True is the one unit that is not, by definition: it is an explicit request for
+    a fresh version, which is what a full `teachme generate` means. A caller that spreads the work
+    over several jobs therefore resolves that flag once, in the `generate_subject` handler, and
+    pins every part unit it enqueues to the version that run produced - so retrying any single job
+    never creates a second version."""
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: UnitKind
+    subject_id: UUID
+    languages: tuple[str, ...] = ()  # OUTLINE: the languages whose glossary translations it owns
+    new_outline: bool = False  # OUTLINE: create a version rather than reuse the current one
+    outline_version: int | None = None  # PART: the version it belongs to
+    part_position: int | None = None  # PART
+    language: str | None = None  # PART
 
 
 class LanguageStatus(BaseModel):
@@ -159,55 +194,156 @@ class TutorialService:
         parts: Sequence[int] | None = None,
         content_only: bool = False,
     ) -> GenerationReport:
-        if subject.state == SubjectState.PUBLISHED:
-            raise SubjectLocked(f"subject {subject.name!r} is published; unpublish before generating")
-        chosen_languages = list(languages or subject.languages)
-        unknown = [code for code in chosen_languages if code not in subject.languages]
-        if unknown:
-            raise GenerationError(f"languages not enabled for this subject: {unknown}")
-        corpus = self.corpus(subject)
-        slug = bundle_slug(subject.name, subject.id)
-        model = self._settings.model_generation
-
-        try:
-            with usage_context(subject_id=subject.id):
-                outline = self._outlines.latest(subject.id)
-                # A content-only run, and any run that names parts, reuses the current version:
-                # regenerating one part into a fresh outline would leave the other parts empty.
-                new_outline = outline is None or (not content_only and parts is None)
-                all_parts = [] if outline is None else self._outlines.parts(outline.id)
-                if parts is not None:  # validate against the current outline, before any model call
-                    unknown = sorted(set(parts) - {p.position for p in all_parts})
-                    if unknown:
-                        raise GenerationError(f"no such parts: {unknown}")
-                if new_outline:
-                    outline = self._create_outline(subject, corpus, model, slug)
-                    all_parts = self._outlines.parts(outline.id)
-                assert outline is not None
-                writer = SubjectBundleWriter(self._bundle_stores, slug, outline.version)
-                terms = self._glossary.terms(outline.id)
-                wanted = [p for p in all_parts if parts is None or p.position in parts]
-
-                results: list[PartLanguageResult] = []
-                for language in chosen_languages:
-                    translations = self._ensure_translations(outline, corpus, language, terms, model, writer)
-                    for part in wanted:
-                        results.append(
-                            self._generate_part(
-                                subject, corpus, outline, part, language, terms, translations, model, writer
-                            )
-                        )
-        except Exception:
-            # Nothing half-written survives: the outline version, its parts and its glossary are
-            # all created in one uncommitted transaction, so a failure before the commit in
-            # _create_outline must not leave a dangling version behind for a later commit to keep.
-            self._conn.rollback()
-            raise
+        """Every unit of one run, in order, in this process - what the CLI calls. The parts are
+        planned after the outline unit has run, because a run that creates a new version only
+        learns its parts by creating them."""
+        plan = self.plan_generation(subject, languages=languages, parts=parts, content_only=content_only)
+        outline_unit = plan[0]
+        self.run_unit(outline_unit)
+        results = [
+            result
+            for unit in self.plan_part_units(subject, languages=languages, parts=parts)
+            if (result := self.run_unit(unit)) is not None
+        ]
+        outline = self._outlines.latest(subject.id)
+        assert outline is not None  # the outline unit created or reused one, or it raised
         return GenerationReport(
             subject=subject.name,
             outline_version=outline.version,
-            new_outline=new_outline,
+            new_outline=outline_unit.new_outline,
             results=results,
+        )
+
+    def plan_generation(
+        self,
+        subject: Subject,
+        *,
+        languages: Sequence[str] | None = None,
+        parts: Sequence[int] | None = None,
+        content_only: bool = False,
+    ) -> list[GenerationUnit]:
+        """The units of one run, in order: the outline and glossary unit first, then one unit per
+        part and language (language-major, the order the report lists results in).
+
+        The parts of an outline version that does not exist yet cannot be named, so a run that will
+        create one stops after the outline unit; running that unit makes the parts real and
+        `plan_part_units` then returns them. Everything a run can refuse - a published subject, a
+        language the subject does not have, a part position the current outline does not have - is
+        refused here, before the first model call."""
+        if subject.state == SubjectState.PUBLISHED:
+            raise SubjectLocked(f"subject {subject.name!r} is published; unpublish before generating")
+        chosen_languages = self._chosen_languages(subject, languages)
+        outline = self._outlines.latest(subject.id)
+        # A content-only run, and any run that names parts, reuses the current version:
+        # regenerating one part into a fresh outline would leave the other parts empty.
+        new_outline = outline is None or (not content_only and parts is None)
+        self._wanted_parts(outline, parts)  # validate against the current outline, before any call
+        unit = GenerationUnit(
+            kind=UnitKind.OUTLINE,
+            subject_id=subject.id,
+            languages=tuple(chosen_languages),
+            new_outline=new_outline,
+        )
+        if new_outline:
+            return [unit]
+        return [unit, *self.plan_part_units(subject, languages=languages, parts=parts)]
+
+    def plan_part_units(
+        self,
+        subject: Subject,
+        *,
+        languages: Sequence[str] | None = None,
+        parts: Sequence[int] | None = None,
+    ) -> list[GenerationUnit]:
+        """One unit per part and language against the subject's current outline version. Called
+        after an outline unit has run, which is when a new version's parts become known."""
+        chosen_languages = self._chosen_languages(subject, languages)
+        outline = self._outlines.latest(subject.id)
+        wanted = self._wanted_parts(outline, parts)
+        if outline is None:
+            return []
+        return [
+            GenerationUnit(
+                kind=UnitKind.PART,
+                subject_id=subject.id,
+                outline_version=outline.version,
+                part_position=part.position,
+                language=language,
+            )
+            for language in chosen_languages
+            for part in wanted
+        ]
+
+    def run_unit(self, unit: GenerationUnit) -> PartLanguageResult | None:
+        """Runs one unit to completion and commits it: the part's result for a PART unit, None for
+        an OUTLINE one. A part the model could not produce comes back as a FAILED result rather
+        than an exception, exactly as it does inside a whole run; anything else rolls the
+        transaction back and propagates, so nothing half-written - an outline version without its
+        glossary, above all - survives for a later commit to keep."""
+        subject = self._subjects.get(unit.subject_id)
+        if subject.state == SubjectState.PUBLISHED:
+            raise SubjectLocked(f"subject {subject.name!r} is published; unpublish before generating")
+        try:
+            with usage_context(subject_id=subject.id):
+                if unit.kind is UnitKind.OUTLINE:
+                    self._run_outline_unit(subject, unit)
+                    return None
+                return self._run_part_unit(subject, unit)
+        except Exception:
+            self._conn.rollback()
+            raise
+
+    def _chosen_languages(self, subject: Subject, languages: Sequence[str] | None) -> list[str]:
+        chosen = list(languages or subject.languages)
+        unknown = [code for code in chosen if code not in subject.languages]
+        if unknown:
+            raise GenerationError(f"languages not enabled for this subject: {unknown}")
+        return chosen
+
+    def _wanted_parts(self, outline: Outline | None, parts: Sequence[int] | None) -> list[Part]:
+        all_parts = [] if outline is None else self._outlines.parts(outline.id)
+        if parts is None:
+            return all_parts
+        unknown = sorted(set(parts) - {p.position for p in all_parts})
+        if unknown:
+            raise GenerationError(f"no such parts: {unknown}")
+        return [p for p in all_parts if p.position in parts]
+
+    def _run_outline_unit(self, subject: Subject, unit: GenerationUnit) -> Outline:
+        corpus = self.corpus(subject)
+        slug = bundle_slug(subject.name, subject.id)
+        model = self._settings.model_generation
+        outline = self._outlines.latest(subject.id)
+        if unit.new_outline or outline is None:
+            outline = self._create_outline(subject, corpus, model, slug)
+        writer = SubjectBundleWriter(self._bundle_stores, slug, outline.version)
+        terms = self._glossary.terms(outline.id)
+        for language in unit.languages:
+            self._ensure_translations(outline, corpus, language, terms, model, writer)
+        return outline
+
+    def _run_part_unit(self, subject: Subject, unit: GenerationUnit) -> PartLanguageResult:
+        assert unit.language is not None and unit.part_position is not None
+        outline = (
+            self._outlines.latest(subject.id)
+            if unit.outline_version is None
+            else self._outlines.get_version(subject.id, unit.outline_version)
+        )
+        if outline is None:
+            raise GenerationError(f"subject {subject.name!r} has no outline v{unit.outline_version}")
+        part = next((p for p in self._outlines.parts(outline.id) if p.position == unit.part_position), None)
+        if part is None:
+            raise GenerationError(f"no such parts: [{unit.part_position}]")
+        corpus = self.corpus(subject)
+        model = self._settings.model_generation
+        writer = SubjectBundleWriter(
+            self._bundle_stores, bundle_slug(subject.name, subject.id), outline.version
+        )
+        terms = self._glossary.terms(outline.id)
+        # Cheap when the outline unit already wrote them: a complete set is read, not regenerated.
+        translations = self._ensure_translations(outline, corpus, unit.language, terms, model, writer)
+        return self._generate_part(
+            subject, corpus, outline, part, unit.language, terms, translations, model, writer
         )
 
     def _create_outline(self, subject: Subject, corpus: SubjectCorpus, model: str, slug: str) -> Outline:

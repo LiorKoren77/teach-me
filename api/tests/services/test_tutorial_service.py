@@ -15,6 +15,13 @@ from teachme.ingestion.bundle import bundle_slug
 from teachme.ingestion.errors import SubjectLocked
 from teachme.ports.llm import LLMError
 from teachme.repositories.usage import UsageRepository
+from teachme.services.generation_jobs import (
+    GENERATE_SUBJECT,
+    GENERATE_UNIT,
+    GenerateSubjectJob,
+    GenerateUnitJob,
+)
+from teachme.services.tutorial import GenerationUnit, UnitKind
 from teachme.settings import Settings
 from tests.helpers import make_pdf
 
@@ -377,3 +384,115 @@ def test_a_draft_regeneration_does_not_overwrite_the_published_version_bundle(co
     keys = store.list_keys(f"{slug}/")
     assert f"{slug}/v2/outline.json" in keys and f"{slug}/v2/parts/01.he.md" in keys
     assert store.get(f"{slug}/v1/parts/01.he.md") == published_part
+
+
+def test_plan_generation_puts_the_outline_first_then_one_unit_per_part_and_language(container):
+    subject = _ingested_subject(container)
+    container.tutorial_service.generate(subject)
+    outline = container.outlines.latest(subject.id)
+    parts = container.outlines.parts(outline.id)
+
+    units = container.tutorial_service.plan_generation(subject, content_only=True)
+    assert units[0].kind is UnitKind.OUTLINE and not units[0].new_outline
+    assert units[0].languages == ("he", "en")
+    assert len(units) == 1 + len(parts) * 2
+    assert [(u.kind, u.language, u.part_position) for u in units[1:]] == [
+        (UnitKind.PART, language, part.position) for language in ("he", "en") for part in parts
+    ]
+    assert all(u.outline_version == outline.version for u in units[1:])
+
+    # A run that will create a new version cannot name its parts yet - they do not exist. The plan
+    # stops at the outline unit; running it is what makes the parts plannable.
+    fresh = container.tutorial_service.plan_generation(subject)
+    assert [u.kind for u in fresh] == [UnitKind.OUTLINE] and fresh[0].new_outline
+    assert container.tutorial_service.plan_part_units(subject, parts=[0]) == [
+        u for u in units[1:] if u.part_position == 0
+    ]
+
+
+def test_run_unit_for_a_part_replaces_its_content_without_a_new_version(container):
+    subject = _ingested_subject(container)
+    container.tutorial_service.generate(subject)
+    outline = container.outlines.latest(subject.id)
+    part = next(p for p in container.outlines.parts(outline.id) if p.position == 0)
+    questions_before = len(container.questions.for_part(part.id, "he"))
+    sections_before = len(container.content.sections(part.id, "he"))
+
+    unit = GenerationUnit(
+        kind=UnitKind.PART,
+        subject_id=subject.id,
+        outline_version=outline.version,
+        part_position=0,
+        language="he",
+    )
+    result = container.tutorial_service.run_unit(unit)
+    assert result is not None
+    assert result.content_status is ContentStatus.READY and result.part_position == 0
+
+    content = container.content.part(part.id, "he")
+    assert content is not None and content.status is ContentStatus.READY
+    assert len(container.questions.for_part(part.id, "he")) == questions_before
+    assert len(container.content.sections(part.id, "he")) == sections_before
+    assert container.outlines.latest(subject.id).version == outline.version
+    assert container.tutorial_service.status(subject).publishable
+
+
+def test_generate_subject_job_runs_the_outline_then_one_job_per_unit(container):
+    subject = _ingested_subject(container)
+    container.job_runner.enqueue(
+        GENERATE_SUBJECT, GenerateSubjectJob(subject_id=subject.id).model_dump(mode="json")
+    )
+    assert container.tutorial_service.status(subject).publishable
+
+    outline = container.outlines.latest(subject.id)
+    expected_units = len(container.outlines.parts(outline.id)) * 2
+    rows = container.conn.execute("SELECT kind, status, payload FROM jobs ORDER BY created_at").fetchall()
+    assert [r["kind"] for r in rows] == [GENERATE_SUBJECT] + [GENERATE_UNIT] * expected_units
+    assert all(r["status"] == "done" for r in rows)
+    units = [GenerateUnitJob.model_validate(r["payload"]).unit for r in rows[1:]]
+    assert all(u.outline_version == outline.version for u in units)
+    assert {(u.language, u.part_position) for u in units} == {
+        (language, part.position)
+        for language in ("he", "en")
+        for part in container.outlines.parts(outline.id)
+    }
+
+
+def test_a_failing_unit_is_recorded_on_its_own_job_and_leaves_the_others_alone(container):
+    subject = _ingested_subject(container, pages=9)
+    teaching = default_responders()[TeachingOut]
+    calls = {"n": 0}
+
+    def fail_the_first_part(request):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise LLMError("teaching service down")
+        return teaching(request)
+
+    container.llm.inner.set_responder(TeachingOut, fail_the_first_part)
+    container.job_runner.enqueue(
+        GENERATE_SUBJECT,
+        GenerateSubjectJob(subject_id=subject.id, languages=("he",)).model_dump(mode="json"),
+    )
+
+    rows = container.conn.execute(
+        "SELECT status, error, payload FROM jobs WHERE kind = %s ORDER BY created_at", (GENERATE_UNIT,)
+    ).fetchall()
+    failed = [r for r in rows if r["status"] == "failed"]
+    assert len(failed) == 1 and "teaching service down" in failed[0]["error"]
+    assert all(r["status"] == "done" for r in rows if r is not failed[0])
+    # the subject-level job still succeeded: its own work (the outline) was done, and the parts
+    # it fanned out answer for themselves
+    subject_job = container.conn.execute(
+        "SELECT status FROM jobs WHERE kind = %s", (GENERATE_SUBJECT,)
+    ).fetchone()
+    assert subject_job["status"] == "done"
+
+    outline = container.outlines.latest(subject.id)
+    parts = container.outlines.parts(outline.id)
+    broken = GenerateUnitJob.model_validate(failed[0]["payload"]).unit
+    for part in parts:
+        content = container.content.part(part.id, "he")
+        assert content is not None
+        expected = ContentStatus.FAILED if part.position == broken.part_position else ContentStatus.READY
+        assert content.status is expected

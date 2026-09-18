@@ -26,6 +26,12 @@ from teachme.repositories.subjects import SubjectRepository
 from teachme.repositories.usage import UsageRepository
 from teachme.retrieval.hybrid import HybridSearch
 from teachme.services.export_import import ExportImportService
+from teachme.services.generation_jobs import (
+    GENERATE_SUBJECT,
+    GENERATE_UNIT,
+    run_generate_subject,
+    run_generate_unit,
+)
 from teachme.services.learning import LearningDeps, LearningService
 from teachme.services.progress import ProgressService
 from teachme.services.sources import SourceService
@@ -130,6 +136,14 @@ class Scope:
     def _ingest_job(self, payload: JobPayload) -> None:
         self.pipeline.ingest_source(UUID(payload["source_id"]))
 
+    def _generate_subject_job(self, payload: JobPayload) -> None:
+        run_generate_subject(
+            payload, service=self.tutorial_service, subjects=self.subjects, runner=self.job_runner
+        )
+
+    def _generate_unit_job(self, payload: JobPayload) -> None:
+        run_generate_unit(payload, service=self.tutorial_service)
+
     @cached_property
     def job_runner(self) -> JobRunner:
         settings = self.shared.settings
@@ -147,7 +161,11 @@ class Scope:
                 commit=self.conn.commit,
             )
         return InProcessJobRunner(
-            {"ingest_source": self._ingest_job},
+            {
+                "ingest_source": self._ingest_job,
+                GENERATE_SUBJECT: self._generate_subject_job,
+                GENERATE_UNIT: self._generate_unit_job,
+            },
             jobs=self.jobs,
             commit=self.conn.commit,
             rollback=self.conn.rollback,
