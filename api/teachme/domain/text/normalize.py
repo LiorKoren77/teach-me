@@ -5,7 +5,19 @@ import unicodedata
 
 from teachme.domain.languages import LANGUAGES
 
-_HEBREW_POINTS = re.compile(r"[֑-ׇ]")  # niqqud and cantillation marks
+_HEBREW_POINTS_BLOCK = range(0x0591, 0x05C8)  # accents, points, and punctuation (maqaf, paseq, ...)
+
+
+def _combining_marks(codepoints: range) -> str:
+    """Combining-mark characters in a codepoint range, escaped for use in a character class.
+
+    Excludes non-mark punctuation in the same block, e.g. Hebrew maqaf/paseq/sof-pasuq/nun-hafukha.
+    """
+    return "".join(re.escape(chr(cp)) for cp in codepoints if unicodedata.category(chr(cp)).startswith("M"))
+
+
+_HEBREW_POINTS = re.compile(f"[{_combining_marks(_HEBREW_POINTS_BLOCK)}]")  # niqqud and cantillation marks
+_ABBREVIATION_JOINERS = re.compile(r"[׳״]|(?<=\w)'(?=\w)")  # geresh, gershayim, mid-word apostrophe
 _WORD = re.compile(r"\w+", re.UNICODE)
 _MIN_LEN_FOR_PREFIX_STRIP = 4
 _MIN_LEN_AFTER_STRIP = 3
@@ -27,8 +39,9 @@ def tokenize(text: str, language_code: str) -> list[str]:
     language = LANGUAGES.get(language_code)
     stopwords = language.stopwords if language else frozenset()
     prefixes = language.prefixes if language else ()
+    joined = _ABBREVIATION_JOINERS.sub("", normalize(text))
     tokens: list[str] = []
-    for raw in _WORD.findall(normalize(text)):
+    for raw in _WORD.findall(joined):
         for variant in _prefix_variants(raw, prefixes):
             if variant in stopwords:
                 continue

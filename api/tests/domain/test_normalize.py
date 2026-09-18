@@ -33,3 +33,20 @@ def test_tokenize_portuguese_keeps_accents():
 
 def test_tokenize_unknown_language_falls_back_to_no_stopwords():
     assert tokenize("the map", "xx") == ["the", "map"]
+
+
+def test_tokenize_hebrew_keeps_maqaf_as_a_word_separator():
+    # U+05BE (maqaf) is Hebrew punctuation, not a vowel point; it must split words, not fuse them.
+    tokens = tokenize("בית־ספר", "he")
+    assert len(tokens) == 2
+    assert "בית" in tokens
+    assert "ביתספר" not in tokens
+
+
+def test_tokenize_hebrew_joins_gershayim_abbreviation():
+    # Gershayim (U+05F4) marks an abbreviation/acronym; it must not split the word in two.
+    assert "תנך" in tokenize("תנ״ך", "he")
+
+
+def test_tokenize_english_joins_apostrophe_contraction():
+    assert tokenize("don't stop", "en") == ["dont", "stop"]
