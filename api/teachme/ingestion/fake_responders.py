@@ -10,7 +10,7 @@ from teachme.ingestion.detect_language import DetectedLanguage
 from teachme.ingestion.read_pages import ReadFigure, ReadPage, ReadPagesOutput
 from teachme.ports.llm import StructuredRequest
 
-_COUNT = re.compile(r"exactly (\d+) pages")
+_COUNT = re.compile(r"exactly (\d+) pages?")
 _PAGE_TAG = re.compile(r'<page index="(\d+)" printed="[^"]*">\n(.*?)\n</page>', re.DOTALL)
 
 

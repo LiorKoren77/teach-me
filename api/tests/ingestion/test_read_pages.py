@@ -67,4 +67,20 @@ def test_read_image_is_a_single_page():
 
 def test_format_figure_block_without_caption():
     block = format_figure_block(ReadFigure(kind="photo", caption="", description="A harbour."))
-    assert block == "\n\n> **[Figure: photo]** A harbour.\n"
+    assert block == "\n\n> **[Figure: photo]** A harbour."
+
+
+def test_read_image_instruction_uses_singular_page():
+    llm = FakeLLM({ReadPagesOutput: lambda req: _output(1, with_figure=False)})
+    read_image(llm, "fake-model", b"\x89PNG", "image/png", page_index=0)
+    text = llm.calls[0].parts[1].text
+    assert "exactly 1 page." in text
+    assert "1 pages" not in text
+
+
+def test_read_pdf_batch_instruction_uses_plural_pages():
+    llm = FakeLLM({ReadPagesOutput: lambda req: _output(3)})
+    batch = PdfBatch(first_index=0, last_index=2, data=b"%PDF")
+    read_pdf_batch(llm, "fake-model", batch, language_hint=None)
+    text = llm.calls[0].parts[1].text
+    assert "exactly 3 pages." in text

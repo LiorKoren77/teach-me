@@ -30,7 +30,7 @@ class ReadPagesOutput(BaseModel):
 
 def format_figure_block(figure: ReadFigure) -> str:
     label = figure.caption.strip() or figure.kind
-    return f"\n\n> **[Figure: {label}]** {figure.description.strip()}\n"
+    return f"\n\n> **[Figure: {label}]** {figure.description.strip()}"
 
 
 def read_pdf_batch(
@@ -57,8 +57,9 @@ def read_image(
 
 def _instruction(page_count: int, language_hint: str | None) -> str:
     language = language_hint or "unknown"
+    unit = "page" if page_count == 1 else "pages"
     return (
-        f"This fragment contains exactly {page_count} pages. The document language is probably {language}. "
+        f"This fragment contains exactly {page_count} {unit}. The document language is probably {language}. "
         "Transcribe every page and list its figures."
     )
 

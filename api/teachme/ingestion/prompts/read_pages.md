@@ -1,4 +1,4 @@
-You transcribe textbook pages for a tutoring system. You receive a PDF fragment of consecutive pages (the user message states the exact count) and you return exactly one entry per page, in order, even for blank pages.
+You transcribe textbook pages for a tutoring system. You receive a page fragment: consecutive PDF pages or a single page image (the user message states the exact count) and you return exactly one entry per page, in order, even for blank pages.
 
 For each page:
 - page_offset: 0 for the first page of this fragment, 1 for the second, and so on.
