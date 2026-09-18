@@ -19,6 +19,7 @@ from teachme.ingestion.pdf_pages import page_count
 from teachme.ports.file_store import FileNotFound
 from teachme.repositories.errors import NotFound
 from teachme.repositories.outlines import OutlineVersionConflict
+from teachme.services.job_execution import run_job
 from teachme.services.subjects import LanguageNotEnabled
 
 app = typer.Typer(no_args_is_help=True, help="teach-me operator commands")
@@ -396,6 +397,39 @@ def jobs_kick() -> None:
             c.job_runner.deliver(job.id, job.kind, job.payload)
             typer.echo(f"delivered: {job.id} ({job.kind})")
         typer.echo(f"{len(queued)} undelivered job(s)")
+
+    _run(body)
+
+
+@app.command()
+def worker(
+    once: bool = typer.Option(False, "--once", help="Run what is already queued, then exit"),
+) -> None:
+    """Run queued jobs off the SQS queue (JOB_RUNNER=sqs).
+
+    The AWS counterpart of `/api/jobs/run`: the same messages, the same per-job execution - one
+    pipeline step per message, each re-enqueuing the remainder - and the same `failed` rows a
+    later delivery can claim. Without `--once` it long-polls until SIGTERM.
+    """
+
+    def body(c: Container) -> None:
+        from teachme.adapters.job_runner.sqs_worker import SqsWorker
+
+        settings = c.settings
+        if settings.job_runner != "sqs":
+            raise ConfigurationError(
+                f"teachme worker consumes the SQS queue, but JOB_RUNNER={settings.job_runner};"
+                " set JOB_RUNNER=sqs (the in-process runner runs its jobs where they are enqueued)"
+            )
+        if not settings.sqs_queue_url:
+            raise ConfigurationError("JOB_RUNNER=sqs requires SQS_QUEUE_URL")
+        scope = c.scope
+        handled = SqsWorker(
+            settings.sqs_queue_url,
+            settings.aws_region,
+            run_job=lambda job_id: run_job(scope, job_id),
+        ).run(once=once)
+        typer.echo(f"{handled} message(s) processed")
 
     _run(body)
 

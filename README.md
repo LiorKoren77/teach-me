@@ -243,7 +243,12 @@ selects:
   `x-job-secret` header (a read timeout means delivered, not failed - the receiving invocation is
   still working). `SELF_BASE_URL` unset means `https://{VERCEL_URL}`, so a preview deployment
   calls itself rather than production.
-- `sqs` enqueues the identical message for an AWS worker.
+- `sqs` enqueues the identical message for a worker outside the request. `teachme worker` is
+  that worker: it long-polls the queue and puts each message through the same per-job execution
+  (`teachme.services.job_execution`) `/api/jobs/run` uses, so AWS runs exactly what Vercel runs.
+  A message whose job ran, or whose job an earlier delivery had already finished, is deleted; one
+  whose job raised is left for the queue to redeliver against the `failed` row it wrote.
+  `teachme worker --once` drains what is queued and exits; without it the loop runs until SIGTERM.
 
 `POST /api/jobs/run` does **one** unit of work per invocation. For `ingest_source` that unit is
 one *read batch* during extraction - `PAGES_PER_READ_BATCH` pages, one vision call - and then one

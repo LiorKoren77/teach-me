@@ -12,8 +12,8 @@ from teachme.repositories.jobs import JobRepository
 
 
 class SqsJobRunner:
-    """Enqueue only. A worker that receives messages and calls the handlers is part of the AWS
-    move (spec section 9), not of this stage.
+    """Enqueue only: `SqsWorker` (same package, `teachme worker`) is what receives these
+    messages and runs them.
 
     commit, when given, is called right after the job row is created (and durably recorded) and
     before the message is sent - a crash or rollback after that point still leaves the queued job

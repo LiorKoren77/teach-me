@@ -7,10 +7,10 @@ from uuid import UUID
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
 
-from teachme.ingestion.pipeline import INGEST_SOURCE
-from teachme.ports.job_runner import JobPayload, UnknownJobKind
+from teachme.ports.job_runner import JobPayload
 from teachme.routes.deps import ScopeDep
 from teachme.scope import Scope
+from teachme.services.job_execution import run_job as run_one_job
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
@@ -26,10 +26,7 @@ class RunJobRequest(BaseModel):
 
 
 class RunJobResult(BaseModel):
-    """One unit of work, done. `next_job_id` names the job that carries on where this one stopped
-    - the rest of an ingestion - and is null when there is nothing left to do. `status` is
-    "skipped" for a delivery that found the job already claimed, which is not a failure and not
-    something to retry: the claim that won it is doing the work."""
+    """`JobOutcome` on the wire. See `teachme.services.job_execution`."""
 
     job_id: UUID
     kind: str
@@ -48,26 +45,6 @@ def _authorize(scope: Scope, given: str | None) -> None:
         raise HTTPException(status_code=401, detail="invalid job secret")
 
 
-def _dispatch(scope: Scope, job_id: UUID, kind: str, payload: JobPayload) -> UUID | None:
-    """One unit of work. An ingestion advances by exactly one step and hands the remainder to a
-    new job, so a 400-page book is many short invocations instead of one that outlives the
-    function's duration limit; the generation kinds are already job-sized.
-
-    The hand-over is inline - the one place in the app where it has to be. Vercel may freeze this
-    instance the moment the response goes out, so a POST left on a daemon thread would take the
-    rest of the ingestion with it. It costs the runner's one-second read timeout, not the step
-    the next invocation is about to run."""
-    if kind == INGEST_SOURCE:
-        if scope.pipeline.run_next_step(UUID(payload["source_id"])):
-            return scope.job_runner.enqueue_inline(INGEST_SOURCE, payload)
-        return None
-    handler = scope.job_handlers.get(kind)
-    if handler is None:
-        raise UnknownJobKind(kind)
-    handler(payload, job_id)
-    return None
-
-
 @router.post("/run", response_model=RunJobResult)
 def run_job(
     body: RunJobRequest,
@@ -80,22 +57,7 @@ def run_job(
     # them back into rows a delivery can claim.
     scope.jobs.fail_stale_running(scope.shared.settings.job_stale_after_seconds)
     scope.conn.commit()
-    job = scope.jobs.get(body.job_id)  # a job id nobody queued is a 404, not a 500
-    claimed = scope.jobs.claim(body.job_id)
-    scope.conn.commit()
-    if claimed is None:
-        # A redelivery of a job that is already running or finished. 200 with no `next_job_id`:
-        # the invoker is told there is nothing to do here rather than asked to try again.
-        return RunJobResult(job_id=job["id"], kind=job["kind"], status="skipped")
-    try:
-        next_job_id = _dispatch(scope, claimed.id, claimed.kind, claimed.payload)
-    except Exception as exc:
-        # The step that failed has already rolled its own work back; this puts the connection in a
-        # state where the job row can be written, and commits it before the error propagates.
-        scope.conn.rollback()
-        scope.jobs.set_status(claimed.id, "failed", error=str(exc))
-        scope.conn.commit()
-        raise
-    scope.jobs.set_status(claimed.id, "done")
-    scope.conn.commit()
-    return RunJobResult(job_id=claimed.id, kind=claimed.kind, status="done", next_job_id=next_job_id)
+    # Claiming, running and recording the job is shared with the SQS worker: what this endpoint
+    # adds is the secret, the sweep and the response shape. A job id nobody queued is a 404.
+    outcome = run_one_job(scope, body.job_id)
+    return RunJobResult(**vars(outcome))
