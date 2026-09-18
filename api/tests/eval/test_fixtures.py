@@ -46,3 +46,13 @@ def test_a_folder_without_a_spec_or_a_source_is_an_error(tmp_path):
     (tmp_path / "en" / "expected.json").write_text("{}", encoding="utf-8")
     with pytest.raises(FixtureError):
         load_cases(tmp_path)
+
+
+def test_a_fixture_whose_language_does_not_match_its_folder_name_is_an_error(tmp_path):
+    spec = json.loads((FIXTURES_DIR / "en" / "expected.json").read_text(encoding="utf-8"))
+    folder = tmp_path / "he"  # folder name disagrees with the spec's "language": "en"
+    folder.mkdir()
+    (folder / "source.md").write_text("text", encoding="utf-8")
+    (folder / "expected.json").write_text(json.dumps(spec), encoding="utf-8")
+    with pytest.raises(FixtureError, match="does not match"):
+        load_cases(tmp_path)

@@ -5,7 +5,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 from teachme.container import Container
-from teachme.domain.models import AttemptQuestion, Question, QuestionKind, Subject, SubjectState
+from teachme.domain.models import AttemptQuestion, Part, Question, QuestionKind, Subject, SubjectState
 from teachme.eval.fixtures import ExpectedAnswer, Fixture, FixtureCase, load_cases
 from teachme.eval.report import AnswerOutcome, EvalReport, FixtureReport
 
@@ -67,7 +67,7 @@ class EvalRunner:
                 language=spec.language,
                 subject=subject.name,
                 subject_id=subject.id,
-                outline_ok=self._outline_ok(subject, spec),
+                outline_ok=self._outline_ok(parts, spec),
                 parts=len(parts),
                 sections=sections,
                 # An answer the harness could not ask counts against agreement: the denominator is
@@ -113,15 +113,14 @@ class EvalRunner:
         scope.subjects.delete(subject.id)
         scope.conn.commit()
 
-    def _outline_shape(self, subject: Subject) -> tuple[list, int]:
+    def _outline_shape(self, subject: Subject) -> tuple[list[Part], int]:
         scope = self._c.scope
         outline = scope.outlines.get_version(subject.id, subject.current_outline_version or 0)
         parts = scope.outlines.parts(outline.id) if outline else []
         return parts, sum(len(scope.outlines.sections(part.id)) for part in parts)
 
-    def _outline_ok(self, subject: Subject, spec: Fixture) -> bool:
+    def _outline_ok(self, parts: list[Part], spec: Fixture) -> bool:
         scope = self._c.scope
-        parts, _ = self._outline_shape(subject)
         return spec.outline.min_parts <= len(parts) <= spec.outline.max_parts and all(
             len(scope.outlines.sections(part.id)) >= spec.outline.min_sections for part in parts
         )

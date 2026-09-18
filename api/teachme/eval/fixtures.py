@@ -77,7 +77,7 @@ def load_cases(directory: Path | None = None, *, languages: Sequence[str] | None
     if not root.is_dir():
         raise FixtureError(f"no fixture directory at {root}")
     wanted = set(languages or ())
-    cases = [case for case in (_load(folder) for folder in sorted(_folders(root)))]
+    cases = list(_load(folder) for folder in sorted(_folders(root)))
     cases = [case for case in cases if not wanted or case.spec.language in wanted]
     if not cases:
         raise FixtureError(f"no fixture in {root} for {sorted(wanted) if wanted else 'any language'}")
@@ -98,6 +98,10 @@ def _load(folder: Path) -> FixtureCase:
         spec = Fixture.model_validate(_parse(spec_path))
     except ValueError as exc:
         raise FixtureError(f"{spec_path}: {exc}") from exc
+    if spec.language != folder.name:
+        raise FixtureError(
+            f"{spec_path}: language {spec.language!r} does not match its folder name {folder.name!r}"
+        )
     return FixtureCase(folder=folder, spec=spec)
 
 
