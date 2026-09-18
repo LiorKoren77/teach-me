@@ -29,3 +29,14 @@ def test_pages_of_a_subject_that_is_not_published_are_not_served(api):  # noqa: 
     assert client.get(f"/api/subjects/{draft.id}/pages/0/image").status_code == 403
     missing = "00000000-0000-0000-0000-000000000000"
     assert client.get(f"/api/subjects/{missing}/pages/0/image").status_code == 404
+
+
+def test_a_ready_source_with_unreadable_bytes_answers_404_not_500(api):  # noqa: F811
+    """pypdfium2's own error must never escape as a 500: the stored bytes can disagree with the
+    source's recorded media type even after ingestion succeeded."""
+    client, subject, *_ = api
+    container = client.app.state.container
+    source = container.scope.sources.list_by_subject(subject.id)[0]
+    container.files.put(source.file_key, b"not a pdf", "application/pdf")
+    response = client.get(f"/api/subjects/{subject.id}/pages/0/image")
+    assert response.status_code == 404 and response.json()["detail"] == "page image unavailable"

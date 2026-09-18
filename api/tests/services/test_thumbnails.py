@@ -62,6 +62,13 @@ def test_a_page_past_the_end_and_a_non_pdf_source_have_no_image():
         _service(_Sources(media_type="text/markdown"), files).png(source_id, page_index=0)
 
 
+def test_an_unreadable_pdf_answers_file_not_found_not_the_vendor_error():
+    files = InMemoryFileStore()
+    files.put("k", b"not a pdf", "application/pdf")
+    with pytest.raises(FileNotFound):
+        _service(_Sources(page_count=None), files).png(uuid4(), page_index=0)
+
+
 def test_a_source_of_unknown_length_is_bounded_by_the_document_itself():
     """page_count is null until extraction has run; the renderer still must not be asked for a
     page the file does not have."""

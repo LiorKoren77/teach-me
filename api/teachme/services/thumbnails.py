@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from teachme.adapters.pdf_render import PageOutOfRange, render_page_png
+from teachme.adapters.pdf_render import PageOutOfRange, UnreadablePdf, render_page_png
 from teachme.ports.file_store import FileNotFound, FileStore
 from teachme.repositories.sources import SourceRepository
 
@@ -39,9 +39,11 @@ class ThumbnailService:
             raise FileNotFound(key)
         try:
             png = render_page_png(self._files.get(source.file_key), page_index=page_index, width=self._width)
-        except PageOutOfRange:
+        except (PageOutOfRange, UnreadablePdf):
             # page_count is null until extraction has run, and a recorded count could still
-            # disagree with the file; the document itself has the last word.
+            # disagree with the file; the document itself has the last word. A page the document
+            # cannot be opened or rendered at all is the same story: no image to serve, not a
+            # vendor error to leak through the service and the route.
             raise FileNotFound(key) from None
         self._files.put(key, png, "image/png")
         return png

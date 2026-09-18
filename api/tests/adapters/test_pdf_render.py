@@ -4,7 +4,7 @@ import struct
 
 import pytest
 
-from teachme.adapters.pdf_render import PageOutOfRange, render_page_png
+from teachme.adapters.pdf_render import PageOutOfRange, UnreadablePdf, render_page_png
 from tests.helpers import make_pdf
 
 
@@ -34,3 +34,10 @@ def test_a_page_the_document_does_not_have_is_refused():
 def test_a_non_positive_width_is_refused():
     with pytest.raises(ValueError):
         render_page_png(make_pdf(1), page_index=0, width=0)
+
+
+def test_unreadable_bytes_raise_unreadable_pdf_instead_of_the_vendor_error():
+    """pypdfium2.PdfiumError escaping the adapter would surface as a 500 through the service and
+    the route; it must come back as our own, named exception instead."""
+    with pytest.raises(UnreadablePdf):
+        render_page_png(b"not a pdf", page_index=0, width=100)
