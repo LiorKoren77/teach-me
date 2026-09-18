@@ -158,7 +158,7 @@ class TutorialService:
         if unknown:
             raise GenerationError(f"languages not enabled for this subject: {unknown}")
         corpus = self.corpus(subject)
-        writer = SubjectBundleWriter(self._bundle_stores, bundle_slug(subject.name, subject.id))
+        slug = bundle_slug(subject.name, subject.id)
         model = self._settings.model_generation
 
         try:
@@ -173,9 +173,10 @@ class TutorialService:
                     if unknown:
                         raise GenerationError(f"no such parts: {unknown}")
                 if new_outline:
-                    outline = self._create_outline(subject, corpus, model, writer)
+                    outline = self._create_outline(subject, corpus, model, slug)
                     all_parts = self._outlines.parts(outline.id)
                 assert outline is not None
+                writer = SubjectBundleWriter(self._bundle_stores, slug, outline.version)
                 terms = self._glossary.terms(outline.id)
                 wanted = [p for p in all_parts if parts is None or p.position in parts]
 
@@ -201,11 +202,10 @@ class TutorialService:
             results=results,
         )
 
-    def _create_outline(
-        self, subject: Subject, corpus: SubjectCorpus, model: str, writer: SubjectBundleWriter
-    ) -> Outline:
+    def _create_outline(self, subject: Subject, corpus: SubjectCorpus, model: str, slug: str) -> Outline:
         outline_out = generate_outline(self._llm, model, subject.name, corpus)
         outline = self._outlines.create(subject.id, model=model)
+        writer = SubjectBundleWriter(self._bundle_stores, slug, outline.version)
         structure: list[tuple[Part, list[Section]]] = []
         for position, part_out in enumerate(outline_out.parts):
             part = self._outlines.add_part(

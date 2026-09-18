@@ -69,8 +69,8 @@ def test_generate_creates_outline_glossary_content_and_questions_for_every_langu
 
     slug = bundle_slug(subject.name, subject.id)
     keys = container.bundle_stores[0].list_keys(f"{slug}/")
-    assert f"{slug}/outline.json" in keys and f"{slug}/glossary.he.json" in keys
-    assert f"{slug}/parts/01.he.md" in keys and f"{slug}/questions.en.jsonl" in keys
+    assert f"{slug}/v1/outline.json" in keys and f"{slug}/v1/glossary.he.json" in keys
+    assert f"{slug}/v1/parts/01.he.md" in keys and f"{slug}/v1/questions.en.jsonl" in keys
 
     purposes = {row["purpose"] for row in UsageRepository(container.conn).summarize(subject_id=subject.id)}
     assert {
@@ -254,3 +254,19 @@ def test_rendered_part_can_render_the_latest_draft_version(container):
     assert rendered.outline_version == 1 and rendered.published
     draft = container.tutorial_service.rendered_part(subject, "he", part_position=0, draft=True)
     assert draft.outline_version == 2 and not draft.published
+
+
+def test_a_draft_regeneration_does_not_overwrite_the_published_version_bundle(container):
+    subject = _ingested_subject(container, languages=("he",))
+    container.tutorial_service.generate(subject)
+    container.tutorial_service.publish(subject)
+    container.tutorial_service.unpublish(container.subjects.get(subject.id))
+
+    slug = bundle_slug(subject.name, subject.id)
+    store = container.bundle_stores[0]
+    published_part = store.get(f"{slug}/v1/parts/01.he.md")
+
+    container.tutorial_service.generate(container.subjects.get(subject.id))
+    keys = store.list_keys(f"{slug}/")
+    assert f"{slug}/v2/outline.json" in keys and f"{slug}/v2/parts/01.he.md" in keys
+    assert store.get(f"{slug}/v1/parts/01.he.md") == published_part

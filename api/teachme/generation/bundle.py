@@ -63,14 +63,23 @@ class QuestionRow(BaseModel):
 
 
 class SubjectBundleWriter:
-    """Subject-level digest files next to the per-source bundles: outline.json, glossary.json,
-    glossary.<lang>.json, parts/NN.<lang>.md, questions.<lang>.jsonl."""
+    """One outline version's subject-level digest files, next to the per-source bundles:
+    v<N>/outline.json, v<N>/glossary.json, v<N>/glossary.<lang>.json, v<N>/parts/NN.<lang>.md,
+    v<N>/questions.<lang>.jsonl.
 
-    def __init__(self, stores: Sequence[FileStore], subject_slug: str) -> None:
+    The version prefix is what keeps a draft regeneration from overwriting the files of the
+    version students are still being taught from: one writer only ever writes its own version."""
+
+    def __init__(self, stores: Sequence[FileStore], subject_slug: str, outline_version: int) -> None:
         self._stores = list(stores)
         self._slug = subject_slug
+        self._version = outline_version
 
     def write_outline(self, outline: Outline, parts: Sequence[tuple[Part, Sequence[Section]]]) -> None:
+        if outline.version != self._version:
+            raise ValueError(
+                f"outline version {outline.version} does not match this writer's version {self._version}"
+            )
         doc = OutlineDoc(
             version=outline.version,
             model=outline.model,
@@ -149,4 +158,4 @@ class SubjectBundleWriter:
 
     def _write(self, relative: str, data: bytes, content_type: str) -> None:
         for store in self._stores:
-            store.put(f"{self._slug}/{relative}", data, content_type)
+            store.put(f"{self._slug}/v{self._version}/{relative}", data, content_type)

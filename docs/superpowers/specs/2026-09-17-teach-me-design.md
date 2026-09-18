@@ -259,7 +259,7 @@ digest/<subject>/<source>/
   figures.json
   chunks.jsonl       context, original text, page range (before embedding)
   embeddings.jsonl   chunk id, model name, vector
-digest/<subject>/
+digest/<subject>/v<outline version>/
   outline.json
   glossary.json  glossary.<lang>.json
   parts/02.<lang>.md
