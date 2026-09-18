@@ -5,6 +5,9 @@ from typing import Literal, Protocol, TypeVar
 
 from pydantic import BaseModel
 
+# Exported for adapters and wrappers implementing `generate_structured` (a plain TypeVar, since
+# Protocol methods cannot use a PEP 695 type parameter). `StructuredResult` below declares its
+# own PEP 695 parameter instead.
 T = TypeVar("T", bound=BaseModel)
 Effort = Literal["low", "medium", "high"]
 
