@@ -4,7 +4,7 @@ import pytest
 
 from teachme.container import Container
 from teachme.domain.models import ContentStatus, SubjectState
-from teachme.generation.errors import SubjectNotReady
+from teachme.generation.errors import GenerationError, SubjectNotReady
 from teachme.generation.glossary import GlossaryOut
 from teachme.generation.question_bank import QuestionBankOut
 from teachme.ingestion.bundle import bundle_slug
@@ -164,4 +164,28 @@ def test_a_glossary_failure_leaves_no_new_outline_version(container):
     container.llm.inner.set_responder(GlossaryOut, boom)
     with pytest.raises(LLMError):
         container.tutorial_service.generate(subject)
+    assert container.outlines.latest(subject.id) is None
+
+
+def test_per_part_regeneration_reuses_the_current_outline_version(container):
+    subject = _ingested_subject(container)
+    container.tutorial_service.generate(subject)
+    report = container.tutorial_service.generate(subject, parts=[0])
+    assert report.outline_version == 1 and not report.new_outline
+    assert {r.part_position for r in report.results} == {0}
+    assert container.tutorial_service.status(subject).publishable
+
+
+def test_generate_rejects_unknown_part_positions(container):
+    subject = _ingested_subject(container)
+    container.tutorial_service.generate(subject)
+    with pytest.raises(GenerationError, match=r"no such parts: \[9\]"):
+        container.tutorial_service.generate(subject, parts=[9])
+    assert container.outlines.latest(subject.id).version == 1
+
+
+def test_generate_rejects_part_selection_before_any_outline_exists(container):
+    subject = _ingested_subject(container)
+    with pytest.raises(GenerationError, match="no such parts"):
+        container.tutorial_service.generate(subject, parts=[0])
     assert container.outlines.latest(subject.id) is None

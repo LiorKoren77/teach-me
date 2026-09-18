@@ -162,11 +162,18 @@ class TutorialService:
         try:
             with usage_context(subject_id=subject.id):
                 outline = self._outlines.latest(subject.id)
-                new_outline = not content_only or outline is None
+                # A content-only run, and any run that names parts, reuses the current version:
+                # regenerating one part into a fresh outline would leave the other parts empty.
+                new_outline = outline is None or (not content_only and parts is None)
+                all_parts = [] if outline is None else self._outlines.parts(outline.id)
+                if parts is not None:  # validate against the current outline, before any model call
+                    unknown = sorted(set(parts) - {p.position for p in all_parts})
+                    if unknown:
+                        raise GenerationError(f"no such parts: {unknown}")
                 if new_outline:
                     outline = self._create_outline(subject, corpus, model, writer)
+                    all_parts = self._outlines.parts(outline.id)
                 assert outline is not None
-                all_parts = self._outlines.parts(outline.id)
                 terms = self._glossary.terms(outline.id)
                 wanted = [p for p in all_parts if parts is None or p.position in parts]
 

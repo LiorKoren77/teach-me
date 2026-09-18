@@ -252,7 +252,12 @@ def usage(subject: str | None = typer.Option(None, "--subject", "-s")) -> None:
 def generate(
     subject: str = typer.Option(..., "--subject", "-s"),
     language: list[str] = typer.Option(None, "--language", "-l", help="Repeatable; default: all enabled"),
-    part: list[int] = typer.Option(None, "--part", "-p", help="Repeatable part positions; default: all"),
+    part: list[int] = typer.Option(
+        None,
+        "--part",
+        "-p",
+        help="Repeatable part positions; reuses the current outline. Default: all parts",
+    ),
     content_only: bool = typer.Option(False, "--content-only", help="Keep the current outline and glossary"),
 ) -> None:
     """Generate outline, glossary, teaching text and question bank for a subject."""

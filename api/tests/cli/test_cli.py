@@ -166,3 +166,12 @@ def test_generate_publish_show_flow(cli):
         app, ["generate", "--subject", "Geo", "--language", "he", "--part", "0", "--content-only"]
     )
     assert result.exit_code == 0 and "outline v1" in result.output
+
+
+def test_generate_rejects_an_unknown_part(cli):
+    app, pdf, tmp_path = cli
+    assert runner.invoke(app, ["ingest", "--subject", "Geo", "--yes", str(pdf)]).exit_code == 0
+    assert runner.invoke(app, ["generate", "--subject", "Geo"]).exit_code == 0
+    result = runner.invoke(app, ["generate", "--subject", "Geo", "--part", "9"])
+    assert result.exit_code == 1
+    assert "error: no such parts: [9]" in result.output
