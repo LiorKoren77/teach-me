@@ -69,6 +69,10 @@ class NotAllowed(LearningError):
     pass
 
 
+class RateLimited(NotAllowed):
+    """Too many submissions in the window. A refusal, but a temporary one: the API answers 429."""
+
+
 class BankExhausted(LearningError):
     """The attempt has asked every question this part has: the part stalls, it is never locked.
 
@@ -257,7 +261,7 @@ class LearningService:
             self._deps.attempts.submissions_since_seconds(user_id, RATE_WINDOW_SECONDS)
             >= self._deps.settings.max_answers_per_minute
         ):
-            raise NotAllowed("rate limit: too many answers in the last minute")
+            raise RateLimited("rate limit: too many answers in the last minute")
         question = self._deps.questions.get(aq.question_id)
         try:
             with usage_context(subject_id=subject.id, user_id=user_id, attempt_id=attempt.id):
